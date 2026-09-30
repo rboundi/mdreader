@@ -1,0 +1,29 @@
+# Template for the cask in github.com/rboundi/homebrew-tap (Casks/mdreader.rb).
+# The release workflow fills in version and sha256 automatically.
+cask "mdreader" do
+  version "1.0.0"
+  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+
+  url "https://github.com/rboundi/mdreader/releases/download/v#{version}/MDReader-#{version}.zip"
+  name "MDReader"
+  desc "Lightweight Markdown reader with tabs, dark mode and PDF export"
+  homepage "https://github.com/rboundi/mdreader"
+
+  depends_on macos: ">= :ventura"
+
+  app "MDReader.app"
+  binary "#{appdir}/MDReader.app/Contents/Resources/mdr"
+
+  zap trash: [
+    "~/Library/Caches/io.github.rboundi.mdreader",
+    "~/Library/HTTPStorages/io.github.rboundi.mdreader",
+    "~/Library/Preferences/io.github.rboundi.mdreader.plist",
+    "~/Library/Saved Application State/io.github.rboundi.mdreader.savedState",
+    "~/Library/WebKit/io.github.rboundi.mdreader",
+  ]
+
+  caveats <<~EOS
+    MDReader is not notarized. If macOS refuses to open it, run:
+      xattr -dr com.apple.quarantine #{appdir}/MDReader.app
+  EOS
+end

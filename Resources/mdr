@@ -1,0 +1,24 @@
+#!/bin/sh
+# mdr — open Markdown files in MDReader.
+#   mdr README.md docs/*.md     open files as tabs
+#   cat notes.md | mdr          read Markdown from stdin
+#   mdr                         just bring MDReader to the front
+BUNDLE_ID="io.github.rboundi.mdreader"
+
+if [ $# -eq 0 ]; then
+  if [ -t 0 ]; then
+    exec open -b "$BUNDLE_ID"
+  fi
+  dir=$(mktemp -d "${TMPDIR:-/tmp}/mdr.XXXXXX") || exit 1
+  cat > "$dir/stdin.md"
+  set -- "$dir/stdin.md"
+fi
+
+for f in "$@"; do
+  if [ ! -f "$f" ]; then
+    echo "mdr: $f: No such file" >&2
+    exit 1
+  fi
+done
+
+exec open -b "$BUNDLE_ID" "$@"

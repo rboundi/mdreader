@@ -1,0 +1,12 @@
+{
+  "name": "mdreader-tests",
+  "private": true,
+  "type": "module",
+  "description": "Renderer tests for MDReader (dev only; nothing here ships in the app).",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}
