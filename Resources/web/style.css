@@ -137,14 +137,16 @@ body[data-font="serif"] .markdown-body :is(h1, h2, h3, h4, h5, h6) { font-family
 .markdown-body h5 { font-size: 0.95em; }
 .markdown-body h6 { font-size: 0.9em; color: var(--muted); }
 
-/* Collapse button in the left margin of each heading. */
+/* Collapse button in the left margin of each heading. Buttons don't inherit the font size,
+   so it is set explicitly: the same 24px target for every heading level. */
 .markdown-body .fold {
   position: absolute;
-  left: -1.4em;
+  left: -28px;
   top: 50%;
-  width: 1.1em;
-  height: 1.1em;
-  margin-top: -0.55em;
+  width: 24px;
+  height: 24px;
+  margin-top: -12px;
+  font-size: 16px;
   padding: 0;
   border: 0;
   background: none;
@@ -156,9 +158,9 @@ body[data-font="serif"] .markdown-body :is(h1, h2, h3, h4, h5, h6) { font-family
 .markdown-body .fold::before {
   content: "";
   display: block;
-  width: 0.38em;
-  height: 0.38em;
-  margin: 0.3em auto 0;
+  width: 7px;
+  height: 7px;
+  margin: 4px auto 0;
   border-right: 2px solid currentColor;
   border-bottom: 2px solid currentColor;
   transform: rotate(45deg);
