@@ -66,8 +66,8 @@ private struct TabItem: View {
             if let detail {
                 Text(detail).lineLimit(1).foregroundStyle(.tertiary)
             }
-            CloseButton { state.close(tab.id) }
-                .opacity(hovering || isSelected ? 1 : 0)
+            CloseButton(dirty: tab.isDirty) { state.close(tab.id) }
+                .opacity(hovering || isSelected || tab.isDirty ? 1 : 0)
         }
         .font(.system(size: 12))
         .padding(.leading, 12)
@@ -87,7 +87,13 @@ private struct TabItem: View {
         .onHover { hovering = $0 }
         .onTapGesture { state.selectedID = tab.id }
         .help(tab.url.path)
-        .onDrag { NSItemProvider(object: tab.id.uuidString as NSString) }
+        .onDrag {
+            // The file itself for Finder, Mail and other apps; the tab id for reordering here.
+            let provider = NSItemProvider(contentsOf: tab.url) ?? NSItemProvider()
+            provider.suggestedName = tab.fileName
+            provider.registerObject(tab.id.uuidString as NSString, visibility: .ownProcess)
+            return provider
+        }
         .onDrop(of: [.text], isTargeted: $dropTarget) { providers in
             _ = providers.first?.loadObject(ofClass: NSString.self) { value, _ in
                 guard let s = value as? String, let id = UUID(uuidString: s) else { return }
@@ -114,13 +120,15 @@ private struct TabItem: View {
 }
 
 private struct CloseButton: View {
+    /// Unsaved changes: a dot, which turns into the close button on hover.
+    var dirty = false
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            Image(systemName: "xmark")
-                .font(.system(size: 9, weight: .bold))
+            Image(systemName: dirty && !hovering ? "circle.fill" : "xmark")
+                .font(.system(size: dirty && !hovering ? 7 : 9, weight: .bold))
                 .foregroundStyle(.secondary)
                 .frame(width: 16, height: 16)
                 .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(hovering ? 0.1 : 0)))
@@ -128,6 +136,6 @@ private struct CloseButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .help("Close Tab (⌘W)")
+        .help(dirty ? "Unsaved changes. Close Tab (⌘W)" : "Close Tab (⌘W)")
     }
 }

@@ -29,7 +29,14 @@ final class AppState: ObservableObject {
             // While restoring, only the finally selected tab is rendered (see restoreTabs).
             if !restoring {
                 reader.display(selected)
-                focusReader()
+                if let tab = selected, tab.editing {
+                    editor.show(tab)
+                    editor.prepare(offset: nil)
+                } else {
+                    // After the editor (if the last tab was being edited) has left the window.
+                    let wasEditing = tabs.first { $0.id == oldValue }?.editing == true
+                    DispatchQueue.main.async { self.focusReader(force: wasEditing) }
+                }
             }
             persistTabs()
             refreshFolder()
@@ -53,6 +60,8 @@ final class AppState: ObservableObject {
     @Published private(set) var folderFiles: [URL] = []
     @Published var palette: PaletteMode?
     @Published var focusMode = false
+    /// Sidebar width while its edge is being dragged.
+    @Published var sidebarDragWidth: Double?
     @Published private(set) var canGoBack = false
     @Published private(set) var canGoForward = false
     @Published var availableUpdate: UpdateChecker.Release?
@@ -62,6 +71,7 @@ final class AppState: ObservableObject {
 
     let reader = ReaderController()
     let search = SearchModel()
+    let editor = EditorController()
 
     private struct Position {
         let url: URL
@@ -71,6 +81,8 @@ final class AppState: ObservableObject {
     private var forwardStack: [Position] = []
     private var folderWatcher: FileWatcher?
     private var watchedFolder: URL?
+    /// Collapsed sections per file path, kept across launches.
+    private var foldMemory = UserDefaults.standard.dictionary(forKey: Prefs.foldMemory) as? [String: [String]] ?? [:]
     /// Last scroll position per file path, kept across launches: path → [y, time saved].
     private var scrollMemory =
         UserDefaults.standard.dictionary(forKey: Prefs.scrollMemory) as? [String: [Double]] ?? [:]
@@ -100,6 +112,20 @@ final class AppState: ObservableObject {
         }
         reader.webView.onDropFiles = { [weak self] urls in self?.open(urls) }
         reader.onDisplay = { [weak self] in self?.renderGeneration += 1 }
+        reader.foldsFor = { [weak self] url in self?.foldMemory[url.path] ?? [] }
+        reader.onFolds = { [weak self] ids in self?.rememberFolds(ids) }
+        reader.webView.onCopyDiagram = { [weak self] index in self?.reader.copyDiagram(index) }
+        reader.webView.onSaveDiagram = { [weak self] index, svg in self?.reader.saveDiagram(index, asSVG: svg) }
+        editor.onDirtyChange = { [weak self] in self?.objectWillChange.send() }
+        // Keeps the outline (drawn from the page underneath) in step with the draft.
+        editor.onTextChange = { [weak self] tab in
+            if tab.id == self?.selectedID { self?.reader.display(tab) }
+        }
+        NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.editor.themeMayHaveChanged() }
+        }
     }
 
     // MARK: Opening & closing
@@ -167,6 +193,7 @@ final class AppState: ObservableObject {
                 tab.onChange = { [weak self, weak tab] in
                     guard let self, let tab else { return }
                     if tab.id == self.selectedID { self.reader.display(tab) }
+                    if tab.editing { self.fileChangedWhileEditing(tab) }
                     self.objectWillChange.send()
                 }
                 tabs.insert(tab, at: min(insertAt, tabs.count))
@@ -212,7 +239,9 @@ final class AppState: ObservableObject {
 
     func close(_ id: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        guard confirmClosing([tabs[index]]) else { return }
         let tab = tabs.remove(at: index)
+        editor.stopShowing(tab)
         rememberScroll(of: tab)
         reader.forget(tab)
         closedTabs.removeAll { $0 == tab.url }
@@ -226,14 +255,18 @@ final class AppState: ObservableObject {
     }
 
     func closeOthers(_ id: UUID) {
+        let others = tabs.filter { $0.id != id }
+        guard confirmClosing(others) else { return }
         selectedID = id  // select first so closing the rest doesn't re-render each neighbour
-        tabs.filter { $0.id != id }.forEach { close($0.id) }
+        others.forEach { close($0.id) }
     }
 
     func closeToRight(_ id: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
+        let right = Array(tabs[(index + 1)...])
+        guard confirmClosing(right) else { return }
         if let selected = selectedIndex, selected > index { selectedID = id }
-        tabs[(index + 1)...].forEach { close($0.id) }
+        right.forEach { close($0.id) }
     }
 
     /// The last ten closed tabs, most recent first.
@@ -325,7 +358,7 @@ final class AppState: ObservableObject {
     // MARK: Viewing
 
     func toggleSource() {
-        guard let tab = selected else { return }
+        guard let tab = selected, !tab.editing else { return }
         tab.showSource.toggle()
         tab.syncOnNextDisplay = true
         objectWillChange.send()
@@ -339,7 +372,7 @@ final class AppState: ObservableObject {
     // MARK: Editing & focus
 
     var editorURL: URL? {
-        UserDefaults.standard.string(forKey: Prefs.editorApp).map { URL(fileURLWithPath: $0) }
+        UserDefaults.standard.string(forKey: Prefs.editorApp).flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
             .flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
     }
 
@@ -347,16 +380,144 @@ final class AppState: ObservableObject {
         editorURL.map { FileManager.default.displayName(atPath: $0.path).replacingOccurrences(of: ".app", with: "") }
     }
 
-    /// Opens the current file in the chosen editor; asks for one the first time.
-    func editInEditor() {
+    /// The Edit button: edits in MDReader, or opens the external editor chosen in Settings.
+    func edit() {
         guard let tab = selected else { return }
-        guard let editor = editorURL ?? chooseEditor() else { return }
-        NSWorkspace.shared.open([tab.url], withApplicationAt: editor, configuration: NSWorkspace.OpenConfiguration()) {
+        if tab.editing {
+            stopEditing(tab)
+            return
+        }
+        guard let app = editorURL else { return startEditing(tab) }
+        NSWorkspace.shared.open([tab.url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration()) {
             _, error in
             if let error {
                 DispatchQueue.main.async { AppState.shared.show(Toast(message: error.localizedDescription)) }
             }
         }
+    }
+
+    private func startEditing(_ tab: DocTab) {
+        guard tab.error == nil else { return NSSound.beep() }
+        guard tab.canEdit else {
+            return show(Toast(message: "Can't edit \(tab.fileName): its text encoding isn't supported"))
+        }
+        findVisible = false
+        reader.placeOffset { [weak self] offset in
+            guard let self, !tab.editing, tab.id == self.selectedID else { return }
+            tab.sourceBeforeEditing = tab.showSource
+            tab.editing = true
+            // The page underneath shows the source, so the outline lists the Markdown headings.
+            if !tab.showSource {
+                tab.showSource = true
+                if tab.id == self.selectedID { self.reader.display(tab) }
+            }
+            self.objectWillChange.send()
+            self.editor.show(tab)
+            self.editor.prepare(offset: offset)
+        }
+    }
+
+    /// Ends editing, asking first about unsaved changes. Returns false if cancelled.
+    @discardableResult
+    func stopEditing(_ tab: DocTab) -> Bool {
+        guard confirmClosing([tab]) else { return false }
+        let offset = editor.tab === tab ? editor.topOffset : nil
+        editor.stopShowing(tab)
+        tab.editing = false
+        tab.draft = nil
+        tab.showSource = tab.sourceBeforeEditing
+        tab.pendingOffset = offset
+        if tab.id == selectedID {
+            reader.display(tab)
+            DispatchQueue.main.async { self.focusReader(force: true) }
+        }
+        objectWillChange.send()
+        return true
+    }
+
+    /// ⌘S
+    func save() {
+        guard let tab = selected, tab.isDirty else { return }
+        save(tab)
+    }
+
+    @discardableResult
+    private func save(_ tab: DocTab) -> Bool {
+        // Changes a file watcher can miss (network volumes) shouldn't be overwritten silently.
+        if tab.changedSinceLoad {
+            let alert = NSAlert()
+            alert.messageText = "\(tab.fileName) changed on disk"
+            alert.informativeText = "It was changed by another app after you started editing. Save your version anyway?"
+            alert.addButton(withTitle: "Save Anyway")
+            alert.addButton(withTitle: "Cancel")
+            if alert.runModal() != .alertFirstButtonReturn { return false }
+        }
+        do {
+            try tab.save()
+            objectWillChange.send()
+            return true
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Couldn't save \(tab.fileName)"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+            return false
+        }
+    }
+
+    /// Asks what to do with unsaved changes in `tabs`: save, discard or cancel. True unless cancelled.
+    func confirmClosing(_ tabs: [DocTab]) -> Bool {
+        let dirty = tabs.filter(\.isDirty)
+        guard !dirty.isEmpty else { return true }
+        let alert = NSAlert()
+        alert.messageText = dirty.count == 1
+            ? "Save changes to \(dirty[0].fileName)?" : "Save changes to \(dirty.count) documents?"
+        alert.informativeText = "Your changes will be lost if you don't save them."
+        alert.addButton(withTitle: dirty.count == 1 ? "Save" : "Save All")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Don't Save")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            return dirty.allSatisfy { save($0) }
+        case .alertThirdButtonReturn:
+            dirty.forEach { $0.draft = nil }
+            objectWillChange.send()
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// The file changed on disk while being edited in MDReader.
+    private func fileChangedWhileEditing(_ tab: DocTab) {
+        guard tab.textChanged else { return }
+        if !tab.isDirty {
+            tab.draft = nil
+            return editor.reload(from: tab)
+        }
+        let alert = NSAlert()
+        alert.messageText = "\(tab.fileName) changed on disk"
+        alert.informativeText = "Keep your edits, or load the version on disk?"
+        alert.addButton(withTitle: "Keep My Edits")
+        alert.addButton(withTitle: "Load from Disk")
+        if alert.runModal() == .alertSecondButtonReturn {
+            tab.draft = nil
+            editor.reload(from: tab)
+        }
+    }
+
+    func foldAll(_ collapsed: Bool) {
+        reader.foldAll(collapsed)
+    }
+
+    private func rememberFolds(_ ids: [String]) {
+        guard let tab = selected, !tab.showSource else { return }
+        foldMemory[tab.url.path] = ids.isEmpty ? nil : ids
+        if foldMemory.count > 300 {
+            foldMemory.keys.filter { key in !tabs.contains { $0.url.path == key } }.prefix(foldMemory.count - 300)
+                .forEach { foldMemory[$0] = nil }
+        }
+        UserDefaults.standard.set(foldMemory, forKey: Prefs.foldMemory)
     }
 
     @discardableResult
@@ -373,8 +534,10 @@ final class AppState: ObservableObject {
     }
 
     /// Gives the page keyboard focus (for j/k and the other reading keys) unless something else has it.
-    func focusReader() {
+    func focusReader(force: Bool = false) {
         guard let window = reader.webView.window, palette == nil else { return }
+        if selected?.editing == true { return editor.focus() }
+        if force { return _ = window.makeFirstResponder(reader.webView) }
         // A text field that has gone away can leave its field editor as first responder.
         let editor = window.firstResponder as? NSTextView
         let orphanedEditor = editor?.isFieldEditor == true && (editor?.delegate as? NSView)?.window == nil
@@ -407,6 +570,12 @@ final class AppState: ObservableObject {
     }
 
     func scrollToHeading(_ id: String) {
+        if let tab = selected, tab.editing {
+            return reader.headingOffset(id) { [weak self] offset in
+                guard let offset, self?.selected === tab else { return }
+                self?.editor.scroll(toOffset: offset)
+            }
+        }
         recordPosition()
         reader.scrollToAnchor(id)
     }
@@ -429,6 +598,9 @@ final class AppState: ObservableObject {
 
     /// Opens the find bar; `step` also moves to the next (1) or previous (-1) match.
     func showFind(step: Int? = nil) {
+        if selected?.editing == true {
+            return editor.find(step == nil ? .showFindInterface : step! > 0 ? .nextMatch : .previousMatch)
+        }
         findVisible = true
         // After the bar exists, so it receives this.
         DispatchQueue.main.async { NotificationCenter.default.post(name: .findNext, object: step) }
@@ -545,7 +717,7 @@ final class AppState: ObservableObject {
     // MARK: Export
 
     func exportPDF() {
-        guard let tab = selected, let window = reader.webView.window else { return }
+        guard let tab = selected, !tab.editing, let window = reader.webView.window else { return }
         let defaults = UserDefaults.standard
         let folder = URL(fileURLWithPath: defaults.string(forKey: Prefs.pdfFolder) ?? Prefs.defaultPDFFolder)
         let baseName = tab.url.deletingPathExtension().lastPathComponent
@@ -567,7 +739,7 @@ final class AppState: ObservableObject {
     }
 
     func exportHTML() {
-        guard let tab = selected, let window = reader.webView.window else { return }
+        guard let tab = selected, !tab.editing, let window = reader.webView.window else { return }
         ensureRendered()
         reader.renderedHTML { [weak self] page in
             guard let self else { return }
@@ -592,7 +764,7 @@ final class AppState: ObservableObject {
     }
 
     func copyRichText() {
-        guard selected != nil else { return }
+        guard let tab = selected, !tab.editing else { return }
         ensureRendered()
         reader.renderedHTML { [weak self] page in
             guard let page else { return }
@@ -607,7 +779,7 @@ final class AppState: ObservableObject {
     }
 
     func printDocument() {
-        guard selected != nil else { return }
+        guard let tab = selected, !tab.editing else { return }
         reader.printDocument()
     }
 

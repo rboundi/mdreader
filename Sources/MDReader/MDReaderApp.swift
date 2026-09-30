@@ -100,10 +100,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        MainActor.assumeIsolated {
+            let state = AppState.shared
+            return state.confirmClosing(state.tabs) ? .terminateNow : .terminateCancel
+        }
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated { AppState.shared.rememberScrollPositions() }
+    }
+}
+
+/// Asks about unsaved edits before the window's close button closes the window (and quits the app).
+final class WindowCloseGuard: NSObject {
+    static let shared = WindowCloseGuard()
+
+    func install(on window: NSWindow) {
+        guard let button = window.standardWindowButton(.closeButton), button.target !== self else { return }
+        button.target = self
+        button.action = #selector(closeClicked(_:))
+    }
+
+    @objc private func closeClicked(_ sender: NSButton) {
+        let proceed = MainActor.assumeIsolated { AppState.shared.confirmClosing(AppState.shared.tabs) }
+        // close() rather than performClose(_:), which would click this button again.
+        if proceed { sender.window?.close() }
     }
 }
 
@@ -142,9 +166,14 @@ struct AppCommands: Commands {
                     .disabled(state.recents.isEmpty)
             }
             Divider()
-            Button(state.editorName.map { "Edit in \($0)" } ?? "Edit in…") { state.editInEditor() }
-                .keyboardShortcut("o", modifiers: [.command, .option])
-                .disabled(state.selected == nil)
+            Button(state.selected?.editing == true ? "Stop Editing" : state.editorName.map { "Edit in \($0)" } ?? "Edit") {
+                state.edit()
+            }
+            .keyboardShortcut("o", modifiers: [.command, .option])
+            .disabled(state.selected == nil)
+            Button("Save") { state.save() }
+                .keyboardShortcut("s")
+                .disabled(state.selected?.isDirty != true)
             Divider()
             Button("Open Clipboard") { state.openClipboard() }
                 .keyboardShortcut("v", modifiers: [.command, .shift])
@@ -165,16 +194,16 @@ struct AppCommands: Commands {
         CommandGroup(replacing: .saveItem) {
             Button("Export as PDF…") { state.exportPDF() }
                 .keyboardShortcut("e")
-                .disabled(state.selected == nil)
+                .disabled(state.selected == nil || state.selected?.editing == true)
             Button("Export as HTML…") { state.exportHTML() }
                 .keyboardShortcut("e", modifiers: [.command, .option])
-                .disabled(state.selected == nil)
+                .disabled(state.selected == nil || state.selected?.editing == true)
         }
 
         CommandGroup(replacing: .printItem) {
             Button("Print…") { state.printDocument() }
                 .keyboardShortcut("p", modifiers: [.command, .shift])
-                .disabled(state.selected == nil)
+                .disabled(state.selected == nil || state.selected?.editing == true)
         }
 
         CommandMenu("Go") {
@@ -195,7 +224,7 @@ struct AppCommands: Commands {
         CommandGroup(after: .pasteboard) {
             Button("Copy as Rich Text") { state.copyRichText() }
                 .keyboardShortcut("c", modifiers: [.command, .option])
-                .disabled(state.selected == nil)
+                .disabled(state.selected == nil || state.selected?.editing == true)
         }
 
         CommandGroup(after: .textEditing) {
@@ -233,6 +262,10 @@ struct AppCommands: Commands {
             .keyboardShortcut("/")
             .disabled(state.selected == nil)
             Toggle("Line Numbers in Markdown Source", isOn: $lineNumbers)
+            Button("Collapse All Sections") { state.foldAll(true) }
+                .disabled(state.selected == nil || state.selected?.showSource == true)
+            Button("Expand All Sections") { state.foldAll(false) }
+                .disabled(state.selected == nil || state.selected?.showSource == true)
             Button("Reload") { state.reloadSelected() }
                 .keyboardShortcut("r")
                 .disabled(state.selected == nil)

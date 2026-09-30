@@ -4,6 +4,7 @@ import SwiftUI
 struct SidebarView: View {
     @EnvironmentObject private var state: AppState
     @AppStorage(Prefs.appearance) private var appearance = AppearanceMode.system.rawValue
+    @AppStorage(Prefs.sidebarWidth) private var width = 230.0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,7 +25,7 @@ struct SidebarView: View {
             case .search: SearchView(model: state.search)
             }
         }
-        .frame(width: 230)
+        .frame(width: state.sidebarDragWidth ?? width)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: Palette.chrome))
     }

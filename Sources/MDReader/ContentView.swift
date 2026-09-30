@@ -17,7 +17,7 @@ struct ContentView: View {
                 if state.sidebarVisible && !state.tabs.isEmpty && !state.focusMode {
                     SidebarView()
                         .transition(.move(edge: .leading))
-                    Divider()
+                    SidebarResizer()
                 }
                 reader
             }
@@ -54,10 +54,13 @@ struct ContentView: View {
             Color(nsColor: Palette.page)
             WebViewHost(webView: state.reader.webView)
                 .opacity(state.tabs.isEmpty ? 0 : 1)
+            if state.selected?.editing == true {
+                EditorHost(editor: state.editor)
+            }
             if state.tabs.isEmpty {
                 EmptyStateView()
             }
-            if state.findVisible && !state.tabs.isEmpty {
+            if state.findVisible && !state.tabs.isEmpty && state.selected?.editing != true {
                 HStack {
                     Spacer()
                     FindBar()
@@ -109,7 +112,7 @@ struct ContentView: View {
                     systemImage: showingSource ? "doc.richtext" : "chevron.left.forwardslash.chevron.right")
             }
             .help(showingSource ? "Show rendered view (⌘/)" : "Show Markdown source (⌘/)")
-            .disabled(state.selected == nil)
+            .disabled(state.selected == nil || editing)
 
             Menu {
                 Button("Find in Document") { state.showFind() }
@@ -124,11 +127,15 @@ struct ContentView: View {
             .disabled(state.selected == nil)
 
             Button {
-                state.editInEditor()
+                state.edit()
             } label: {
-                Label("Edit", systemImage: "pencil")
+                if editing {
+                    Label("Done", systemImage: "checkmark.circle.fill")
+                } else {
+                    Label("Edit", systemImage: "pencil")
+                }
             }
-            .help(state.editorName.map { "Edit in \($0)" } ?? "Edit in…")
+            .help(editing ? "Stop editing (⌥⌘O)" : state.editorName.map { "Edit in \($0) (⌥⌘O)" } ?? "Edit (⌥⌘O)")
             .disabled(state.selected == nil)
 
             if let url = state.selected?.url {
@@ -150,11 +157,12 @@ struct ContentView: View {
                 state.exportPDF()
             }
             .help("Export as PDF (⌘E)")
-            .disabled(state.selected == nil)
+            .disabled(state.selected == nil || editing)
         }
     }
 
     private var showingSource: Bool { state.selected?.showSource ?? false }
+    private var editing: Bool { state.selected?.editing ?? false }
 
     private static func modifiedText(_ date: Date) -> String {
         let calendar = Calendar.current
@@ -167,6 +175,7 @@ struct ContentView: View {
     private var subtitle: String {
         guard let tab = state.selected else { return "" }
         let folder = (tab.url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath
+        if tab.editing { return "\(folder) — Editing" + (tab.isDirty ? ", not saved" : "") }
         if tab.showSource { return "\(folder) — Markdown" }
         guard tab.error == nil else { return folder }
         var parts = [folder]
@@ -180,11 +189,67 @@ struct ContentView: View {
     }
 }
 
+/// The sidebar's right edge; drag it to change the sidebar's width.
+struct SidebarResizer: View {
+    @EnvironmentObject private var state: AppState
+    @AppStorage(Prefs.sidebarWidth) private var width = 230.0
+    @State private var startWidth: Double?
+    @State private var hovering = false
+    @State private var cursorPushed = false
+
+    var body: some View {
+        Rectangle()
+            .fill(Color(nsColor: .separatorColor))
+            .frame(width: 1)
+            .overlay {
+                Color.clear
+                    .frame(width: 7)
+                    .contentShape(Rectangle())
+                    .onHover { inside in
+                        hovering = inside
+                        updateCursor()
+                    }
+                    .gesture(
+                        DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                            .onChanged { drag in
+                                let start = startWidth ?? width
+                                startWidth = start
+                                // Saved when the drag ends; writing settings on every frame is slow.
+                                state.sidebarDragWidth = min(max(start + drag.translation.width, 170), 480)
+                                updateCursor()
+                            }
+                            .onEnded { _ in
+                                if let dragged = state.sidebarDragWidth { width = dragged }
+                                state.sidebarDragWidth = nil
+                                startWidth = nil
+                                updateCursor()
+                            }
+                    )
+            }
+            .onDisappear {
+                hovering = false
+                startWidth = nil
+                updateCursor()
+            }
+    }
+
+    /// One push while hovering or dragging, one pop after.
+    private func updateCursor() {
+        let want = hovering || startWidth != nil
+        if want && !cursorPushed { NSCursor.resizeLeftRight.push() }
+        if !want && cursorPushed { NSCursor.pop() }
+        cursorPushed = want
+    }
+}
+
 /// Hosts the long-lived web view owned by `ReaderController`.
 struct WebViewHost: NSViewRepresentable {
     let webView: ReaderWebView
     func makeNSView(context: Context) -> ReaderWebView {
-        DispatchQueue.main.async { AppState.shared.focusReader() }
+        DispatchQueue.main.async {
+            AppState.shared.focusReader()
+            if let window = webView.window { WindowCloseGuard.shared.install(on: window) }
+        }
         return webView
     }
     func updateNSView(_ nsView: ReaderWebView, context: Context) {}

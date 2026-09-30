@@ -16,6 +16,9 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
     var onOutline: (([OutlineItem]) -> Void)?
     var onActiveHeading: ((String?) -> Void)?
     var onDisplay: (() -> Void)?
+    /// Collapsed section ids for a file, and changes to them.
+    var foldsFor: ((URL) -> [String])?
+    var onFolds: (([String]) -> Void)?
 
     private let templateURL = Bundle.main.resourceURL?.appendingPathComponent("web/index.html")
     private var ready = false
@@ -105,11 +108,15 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
         let sync = tab.syncOnNextDisplay
         tab.syncOnNextDisplay = false
         documentName = tab.documentName
+        let offset = tab.pendingOffset ?? -1
+        tab.pendingOffset = nil
         send([
             "path": tab.url.path,
+            "folds": foldsFor?(tab.url) ?? [],
+            "offset": offset,
             "sync": sync,
             "anchor": anchor,
-            "md": tab.text,
+            "md": tab.displayText,
             "source": tab.showSource,
             "base": tab.url.deletingLastPathComponent().absoluteString,
             "title": tab.title,
@@ -149,6 +156,98 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
         webView.callAsyncJavaScript(
             "window.mdr.scrollToAnchor(id)", arguments: ["id": id], in: nil, in: .page,
             completionHandler: nil)
+    }
+
+    func foldAll(_ collapsed: Bool) {
+        webView.callAsyncJavaScript(
+            "window.mdr.foldAll(c)", arguments: ["c": collapsed], in: nil, in: .page, completionHandler: nil)
+    }
+
+    /// Character offset in the Markdown of what's at the top of the page.
+    func placeOffset(completion: @escaping (Int) -> Void) {
+        webView.callAsyncJavaScript("return window.mdr.placeOffset()", arguments: [:], in: nil, in: .page) {
+            result in
+            if case .success(let value) = result, let n = value as? NSNumber { completion(n.intValue) } else { completion(0) }
+        }
+    }
+
+    /// Character offset of an outline heading.
+    func headingOffset(_ id: String, completion: @escaping (Int?) -> Void) {
+        webView.callAsyncJavaScript("return window.mdr.headingOffset(id)", arguments: ["id": id], in: nil, in: .page) {
+            result in
+            if case .success(let value) = result, let n = value as? NSNumber { completion(n.intValue) } else { completion(nil) }
+        }
+    }
+
+    // MARK: Diagrams
+
+    func copyDiagram(_ index: Int) {
+        diagramImage(index) { image in
+            guard let image else { return NSSound.beep() }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.writeObjects([image])
+        }
+    }
+
+    func saveDiagram(_ index: Int, asSVG: Bool) {
+        let name = "\(documentName.isEmpty ? "Diagram" : documentName) diagram \(index + 1).\(asSVG ? "svg" : "png")"
+        let write: (URL) -> Void = { [weak self] url in
+            if asSVG {
+                self?.webView.callAsyncJavaScript(
+                    "return window.mdr.diagramSVG(i)", arguments: ["i": index], in: nil, in: .page
+                ) { result in
+                    guard case .success(let value) = result, let svg = value as? String else { return NSSound.beep() }
+                    try? svg.write(to: url, atomically: true, encoding: .utf8)
+                }
+            } else {
+                self?.diagramImage(index) { image in
+                    guard let tiff = image?.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+                        let png = rep.representation(using: .png, properties: [:])
+                    else { return NSSound.beep() }
+                    try? png.write(to: url)
+                }
+            }
+        }
+        guard let window = webView.window else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [asSVG ? .svg : .png]
+        panel.nameFieldStringValue = name
+        panel.directoryURL = URL(
+            fileURLWithPath: UserDefaults.standard.string(forKey: Prefs.pdfFolder) ?? Prefs.defaultPDFFolder)
+        panel.beginSheetModal(for: window) { response in
+            if response == .OK, let url = panel.url { write(url) }
+        }
+    }
+
+    /// The diagram as shown on the page, at twice its size. Works for diagrams taller than the window.
+    private func diagramImage(_ index: Int, completion: @escaping (NSImage?) -> Void) {
+        webView.callAsyncJavaScript("return window.mdr.diagramRect(i)", arguments: ["i": index], in: nil, in: .page) {
+            [weak self] result in
+            guard let self, case .success(let value) = result, let r = value as? [String: Any],
+                let x = (r["x"] as? NSNumber)?.doubleValue, let y = (r["y"] as? NSNumber)?.doubleValue,
+                let w = (r["width"] as? NSNumber)?.doubleValue, let h = (r["height"] as? NSNumber)?.doubleValue,
+                w > 0, h > 0
+            else { return completion(nil) }
+            let zoom = self.webView.pageZoom
+            let config = WKPDFConfiguration()
+            config.rect = CGRect(x: x * zoom, y: y * zoom, width: w * zoom, height: h * zoom)
+            self.webView.createPDF(configuration: config) { result in
+                guard case .success(let data) = result, let pdf = NSPDFImageRep(data: data),
+                    let bitmap = NSBitmapImageRep(
+                        bitmapDataPlanes: nil, pixelsWide: Int(pdf.bounds.width * 2), pixelsHigh: Int(pdf.bounds.height * 2),
+                        bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                        colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+                else { return completion(nil) }
+                bitmap.size = pdf.bounds.size
+                NSGraphicsContext.saveGraphicsState()
+                NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+                pdf.draw(in: NSRect(origin: .zero, size: pdf.bounds.size))
+                NSGraphicsContext.restoreGraphicsState()
+                let image = NSImage(size: pdf.bounds.size)
+                image.addRepresentation(bitmap)
+                completion(image)
+            }
+        }
     }
 
     private func applyOptions() {
@@ -381,6 +480,9 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
             lightboxOpen = (body["open"] as? Bool) ?? false
         case "context":
             webView.contextHeading = body["heading"] as? String ?? ""
+            webView.contextDiagram = (body["diagram"] as? NSNumber)?.intValue ?? -1
+        case "folds":
+            onFolds?(body["ids"] as? [String] ?? [])
         case "links":
             if let token = body["token"] as? NSNumber, let files = body["files"] as? [String] {
                 checkLinks(files, token: token.intValue)
@@ -537,6 +639,10 @@ final class ReaderWebView: WKWebView {
     var canScrollHorizontally = false
     /// Id of the heading under the last right-click, reported by the page just before the menu opens.
     var contextHeading = ""
+    /// Index of the diagram under the last right-click, or -1.
+    var contextDiagram = -1
+    var onCopyDiagram: ((Int) -> Void)?
+    var onSaveDiagram: ((Int, Bool) -> Void)?
 
     private static let hiddenMenuItems = [
         "Reload", "GoBack", "GoForward", "OpenLink", "OpenImage", "DownloadLinked", "DownloadImage",
@@ -557,9 +663,27 @@ final class ReaderWebView: WKWebView {
             menu.insertItem(item, at: 0)
             if menu.items.count > 1 { menu.insertItem(.separator(), at: 1) }
         }
+        if contextDiagram >= 0 {
+            let items = [
+                NSMenuItem(title: "Copy Diagram", action: #selector(copyDiagram(_:)), keyEquivalent: ""),
+                NSMenuItem(title: "Save Diagram as PNG…", action: #selector(saveDiagramPNG(_:)), keyEquivalent: ""),
+                NSMenuItem(title: "Save Diagram as SVG…", action: #selector(saveDiagramSVG(_:)), keyEquivalent: ""),
+            ]
+            if !menu.items.isEmpty { menu.insertItem(.separator(), at: 0) }
+            for item in items.reversed() {
+                item.target = self
+                item.tag = contextDiagram
+                menu.insertItem(item, at: 0)
+            }
+        }
         contextHeading = ""
+        contextDiagram = -1
         super.willOpenMenu(menu, with: event)
     }
+
+    @objc private func copyDiagram(_ sender: NSMenuItem) { onCopyDiagram?(sender.tag) }
+    @objc private func saveDiagramPNG(_ sender: NSMenuItem) { onSaveDiagram?(sender.tag, false) }
+    @objc private func saveDiagramSVG(_ sender: NSMenuItem) { onSaveDiagram?(sender.tag, true) }
 
     @objc private func copyHeadingLink(_ sender: NSMenuItem) {
         if let id = sender.representedObject as? String { onCopyHeadingLink?(id) }

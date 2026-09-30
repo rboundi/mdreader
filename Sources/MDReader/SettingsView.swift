@@ -72,7 +72,13 @@ struct SettingsView: View {
                 HStack {
                     Text("Edit with")
                     Spacer()
-                    Text(editorName ?? "Not set").foregroundStyle(.secondary)
+                    Text(editorName ?? "MDReader").foregroundStyle(.secondary)
+                    if editorName != nil {
+                        Button("Use MDReader") {
+                            UserDefaults.standard.removeObject(forKey: Prefs.editorApp)
+                            editorPath = ""
+                        }
+                    }
                     Button("Choose…") {
                         AppState.shared.chooseEditor()
                         editorPath = UserDefaults.standard.string(forKey: Prefs.editorApp) ?? ""

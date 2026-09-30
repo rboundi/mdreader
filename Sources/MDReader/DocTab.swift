@@ -13,6 +13,31 @@ final class DocTab: Identifiable {
     var pendingScroll: Double?
     /// Set when switching between rendered and source view, so the reader keeps their place.
     var syncOnNextDisplay = false
+    /// Character offset to show on the next render (coming back from the editor).
+    var pendingOffset: Int?
+    /// Being edited in MDReader's editor.
+    var editing = false
+    /// The view to return to when editing ends.
+    var sourceBeforeEditing = false
+    /// Edited text not yet saved; nil when there are no unsaved changes.
+    var draft: String?
+    var isDirty: Bool { draft != nil && draft != text }
+    /// What the page shows: the unsaved draft while editing, so the outline follows the edits.
+    var displayText: String { editing ? draft ?? text : text }
+    /// The last load found different text than before (as opposed to the same save arriving back).
+    private(set) var textChanged = false
+    /// How the file was encoded, so saving keeps it.
+    private(set) var encoding: String.Encoding = .utf8
+    /// Byte-order mark the file started with, written back on save.
+    private var bom = Data()
+    /// The file used \r\n line endings; saving converts the editor's \n back.
+    private var crlf = false
+    /// False when the file's encoding wasn't recognized: saving would damage its text.
+    private(set) var canEdit = true
+    /// Cursor and scroll position in the editor, and undo history, kept while switching tabs.
+    var editorSelection: NSRange?
+    var editorScroll: NSPoint?
+    let undoManager = UndoManager()
     private(set) var wordCount = 0
     private(set) var tasks = (done: 0, total: 0)
     private(set) var modified: Date?
@@ -50,15 +75,49 @@ final class DocTab: Identifiable {
     }
 
     /// UTF-8 first; UTF-16 only with a byte-order mark; then Windows-1252 / Latin-1 for old files.
-    private static func decode(_ data: Data) -> String {
-        if data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF]),
-            let s = String(data: data, encoding: .utf16)
-        {
-            return s
+    private struct Decoded {
+        let text: String
+        let encoding: String.Encoding
+        var bom = Data()
+        var exact = true
+    }
+
+    private static func decode(_ data: Data) -> Decoded {
+        for (mark, encoding) in [
+            (Data([0xEF, 0xBB, 0xBF]), String.Encoding.utf8),
+            (Data([0xFF, 0xFE]), .utf16LittleEndian),
+            (Data([0xFE, 0xFF]), .utf16BigEndian),
+        ] where data.starts(with: mark) {
+            if let s = String(data: data.dropFirst(mark.count), encoding: encoding) {
+                return Decoded(text: s, encoding: encoding, bom: mark)
+            }
         }
-        return String(data: data, encoding: .utf8)
-            ?? String(data: data, encoding: .windowsCP1252)
-            ?? String(decoding: data, as: UTF8.self)
+        if let s = String(data: data, encoding: .utf8) { return Decoded(text: s, encoding: .utf8) }
+        if let s = String(data: data, encoding: .windowsCP1252) { return Decoded(text: s, encoding: .windowsCP1252) }
+        return Decoded(text: String(decoding: data, as: UTF8.self), encoding: .utf8, exact: false)
+    }
+
+    /// Writes the draft to disk in the file's encoding (UTF-8 if it can't hold the new text).
+    /// Writes the draft in the file's encoding and line endings. A file that was Windows-1252 and
+    /// now holds characters it can't store is saved as UTF-8.
+    func save() throws {
+        guard let draft else { return }
+        var text = draft
+        if crlf { text = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\n", with: "\r\n") }
+        let data = text.data(using: encoding).map { bom + $0 } ?? Data(text.utf8)
+        // Through a symlink, write to the file it points to rather than replacing the link.
+        try data.write(to: url.resolvingSymlinksInPath(), options: .atomic)
+        self.draft = nil
+        load()
+    }
+
+    /// The file was changed on disk after it was last read.
+    var changedSinceLoad: Bool {
+        guard let modified,
+            let now = (try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate
+        else { return false }
+        return now.timeIntervalSince(modified) > 0.001
     }
 
     /// Words that contain a letter or digit, so Markdown punctuation (#, -, |, ```) isn't counted.
@@ -138,13 +197,22 @@ final class DocTab: Identifiable {
 
     private func load() {
         do {
-            text = Self.decode(try Data(contentsOf: url))
+            let old = text
+            let decoded = Self.decode(try Data(contentsOf: url))
+            text = decoded.text
+            encoding = decoded.encoding
+            bom = decoded.bom
+            canEdit = decoded.exact
+            crlf = text.contains("\r\n")
+            textChanged = text != old
             error = nil
             wordCount = Self.countWords(text)
             tasks = Self.countTasks(text)
             frontMatterTitle = Self.frontMatterTitle(text)
-            modified = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            modified = (try? url.resolvingSymlinksInPath().resourceValues(forKeys: [.contentModificationDateKey]))?
+                .contentModificationDate
         } catch {
+            textChanged = false
             if !FileManager.default.fileExists(atPath: url.path) {
                 self.error = "\(url.path) was moved or deleted."
             } else {

@@ -13,6 +13,7 @@ const scripts = [
   "vendor/marked.umd.js",
   "vendor/marked-footnote.umd.js",
   "vendor/highlight.min.js",
+  "emoji.js",
   "app.js",
 ].map(read);
 
@@ -399,4 +400,112 @@ test("a front matter change alone doesn't count as an edit", () => {
   assert.equal(c.querySelector(".just-edited"), null);
   const d = render("---\nupdated: 3\n---\n\n# A\n\none, edited", { scroll: -1 });
   assert.equal(d.querySelector(".just-edited")?.textContent, "one, edited");
+});
+
+test("==highlights== and :emoji: shortcodes", () => {
+  const { render } = setup();
+  const c = render("Some ==marked **text**== here, a === b, :tada: :+1: and :not_an_emoji: 12:30:45\n\n`:tada:`");
+  assert.equal(c.querySelector("mark.highlight").innerHTML, "marked <strong>text</strong>");
+  assert.equal(c.querySelectorAll("mark").length, 1);
+  assert.match(c.textContent, /🎉 👍 and :not_an_emoji: 12:30:45/);
+  assert.equal(c.querySelector("code").textContent, ":tada:");
+});
+
+test("Obsidian callouts: types, custom titles and folding", () => {
+  const { render } = setup();
+  const c = render("> [!faq]- Why *this*?\n> Because.\n\n> [!bug]\n> Oops.\n\n> [!custom] Mine\n> Text");
+  const faq = c.querySelector("details.alert-question");
+  assert.ok(faq);
+  assert.equal(faq.open, false);
+  assert.equal(faq.querySelector("summary").textContent, "Why this?");
+  assert.match(faq.textContent, /Because\./);
+  const bug = c.querySelector("blockquote.alert-bug");
+  assert.equal(bug.querySelector(".alert-title").textContent, "Bug");
+  assert.ok(bug.querySelector("svg"));
+  assert.equal(c.querySelector("blockquote.alert-note .alert-title").textContent, "Mine");
+});
+
+test("[TOC] becomes a nested list of heading links", () => {
+  const { render } = setup();
+  const c = render("# Title\n\n[TOC]\n\n## One\n\n### One A\n\n## Two");
+  const links = [...c.querySelectorAll("nav.toc a")].map((a) => [a.textContent, a.getAttribute("href")]);
+  same(links, [["One", "#one"], ["One A", "#one-a"], ["Two", "#two"]]);
+  assert.ok(c.querySelector("nav.toc > ul > li > ul > li"));
+});
+
+test("simple front matter shows as a table; nested YAML stays YAML", () => {
+  const { render } = setup();
+  let c = render("---\ntitle: \"Hello\"\ntags: [a, b]\nauthors:\n  - Ann\n  - Bo\n---\n\nText");
+  const rows = [...c.querySelectorAll(".front-matter tr")]
+    .map((tr) => [...tr.children].map((cell) => cell.textContent.trim()).join(" ").replace(/\s+/g, " "));
+  same(rows, ["title Hello", "tags a b", "authors Ann Bo"]);
+  assert.equal(c.querySelectorAll(".front-matter .tag").length, 4);
+  c = render("---\nmeta:\n  key: value\n---\n\nText", { title: "b.md" });
+  assert.ok(c.querySelector(".front-matter pre"));
+});
+
+test("clicking a table header sorts the rows, numbers by value", () => {
+  const { window, render } = setup();
+  const c = render("| Name | Size |\n|---|---|\n| b | 10 |\n| a | 9 |\n| c | 100 |");
+  const size = c.querySelectorAll("th")[1];
+  const col = (i) => [...c.querySelectorAll("tbody tr")].map((tr) => tr.cells[i].textContent);
+  size.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  same(col(1), ["9", "10", "100"]);
+  size.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  same(col(1), ["100", "10", "9"]);
+  c.querySelectorAll("th")[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  same(col(0), ["a", "b", "c"]);
+});
+
+test("collapsed sections are reported, restored, and fold all works", () => {
+  const { window, render, messages } = setup();
+  let c = render("## A\n\none\n\n## B\n\ntwo\n\n## C\n\nthree");
+  c.querySelector("#b .fold").dispatchEvent(new window.MouseEvent("click", { bubbles: true, altKey: true }));
+  same(messages.findLast((m) => m.type === "folds").ids, ["a", "b", "c"]);
+  window.mdr.foldAll(false);
+  same(messages.findLast((m) => m.type === "folds").ids, []);
+  c = render("## A\n\none\n\n## B\n\ntwo", { title: "other.md", folds: ["b"] });
+  assert.ok(c.querySelector("#b").classList.contains("collapsed"));
+  assert.equal(c.querySelector("#a").classList.contains("collapsed"), false);
+});
+
+test("hovering a link shows where it goes", () => {
+  const { window, render } = setup();
+  const c = render("[doc](sub/My%20Note.md#x) [web](https://example.com/a)");
+  const [doc, web] = c.querySelectorAll("a");
+  doc.dispatchEvent(new window.MouseEvent("mouseover", { bubbles: true }));
+  assert.equal(window.document.getElementById("link-status").textContent, "sub/My Note.md#x");
+  web.dispatchEvent(new window.MouseEvent("mouseover", { bubbles: true }));
+  assert.equal(window.document.getElementById("link-status").textContent, "https://example.com/a");
+});
+
+test("callout titles can't smuggle HTML past the sanitizer", () => {
+  const { render } = setup();
+  const c = render('> [!note] [x](http://a "<br><style>body{}</style><form></form>")\n> Body');
+  assert.equal(c.querySelector("style, form, meta"), null);
+  assert.equal(c.querySelector(".alert-title a").textContent, "x");
+  assert.match(c.querySelector(".alert").textContent, /Body/);
+});
+
+test("highlights and emoji need a word boundary; [[_TOC_]] works", () => {
+  const { render } = setup();
+  const c = render("a==b and c==d, YQ==,ZQ==, 10:100:20, ok ==yes== :tada:\n\n[[_TOC_]]\n\n## One");
+  same([...c.querySelectorAll("mark")].map((m) => m.textContent), ["yes"]);
+  assert.match(c.textContent, /10:100:20/);
+  assert.match(c.textContent, /🎉/);
+  assert.ok(c.querySelector("nav.toc a[href='#one']"));
+});
+
+test("heading offsets in CRLF files point at the heading", () => {
+  const { window, render } = setup();
+  const md = "Intro\r\n\r\nMore\r\n\r\n## Heading\r\n\r\nText";
+  render(md, { source: true });
+  assert.equal(window.mdr.headingOffset("source-0"), md.indexOf("## Heading"));
+});
+
+test("version numbers sort as versions, not decimals", () => {
+  const { window, render } = setup();
+  const c = render("| v |\n|---|\n| 1.10.0 |\n| 1.2.0 |\n| 1.9.0 |");
+  c.querySelector("th").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  same([...c.querySelectorAll("tbody td")].map((td) => td.textContent), ["1.2.0", "1.9.0", "1.10.0"]);
 });

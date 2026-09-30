@@ -66,6 +66,8 @@ enum Prefs {
     static let followEdits = "followEdits"
     static let lineNumbers = "lineNumbers"
     static let searchScope = "searchScope"
+    static let foldMemory = "foldMemory"
+    static let sidebarWidth = "sidebarWidth"
 
     static var defaultPDFFolder: String {
         FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first?.path
@@ -177,6 +179,16 @@ enum Palette {
         return appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             ? NSColor(srgbRed: 0x1c / 255, green: 0x1c / 255, blue: 0x1e / 255, alpha: 1)
             : NSColor.white
+    }
+
+    /// Body text, for the editor (keep in sync with --fg in style.css).
+    static let text = NSColor(name: nil) { appearance in
+        if Prefs.appearanceMode == .sepia {
+            return NSColor(srgbRed: 0x3D / 255, green: 0x33 / 255, blue: 0x26 / 255, alpha: 1)
+        }
+        return appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(srgbRed: 0xE6 / 255, green: 0xE6 / 255, blue: 0xE8 / 255, alpha: 1)
+            : NSColor(srgbRed: 0x1F / 255, green: 0x23 / 255, blue: 0x28 / 255, alpha: 1)
     }
 
     /// Tab bar, sidebar and toolbar: the system window color, or a darker sepia.

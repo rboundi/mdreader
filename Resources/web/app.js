@@ -6,9 +6,37 @@
   const ROOT = (document.currentScript?.src || location.href).replace(/[^/]*$/, "");
   let content = document.getElementById("content");
 
-  const ALERTS = {
-    NOTE: "Note", TIP: "Tip", IMPORTANT: "Important", WARNING: "Warning", CAUTION: "Caution",
+  // GitHub alerts and Obsidian callouts: written type → style.
+  const CALLOUTS = {
+    note: "note", info: "info", todo: "todo", abstract: "abstract", summary: "abstract", tldr: "abstract",
+    tip: "tip", hint: "tip", important: "important", success: "success", check: "success", done: "success",
+    question: "question", help: "question", faq: "question", warning: "warning", attention: "warning",
+    caution: "caution", failure: "failure", fail: "failure", missing: "failure", danger: "danger",
+    error: "danger", bug: "bug", example: "example", quote: "quote", cite: "quote",
   };
+  const CALLOUT_LABELS = { tldr: "TL;DR", faq: "FAQ", todo: "To do" };
+  const CIRCLE = '<circle cx="12" cy="12" r="9"/>';
+  const ICONS = {
+    note: CIRCLE + '<path d="M12 11v5M12 8h.01"/>',
+    info: CIRCLE + '<path d="M12 11v5M12 8h.01"/>',
+    todo: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8.5 12l2.5 2.5 4.5-5"/>',
+    abstract: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 9h6M9 13h6M9 17h4"/>',
+    tip: '<path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2V16h5v-.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z"/>',
+    important: '<path d="M4 5h16v11H9l-5 4z"/><path d="M12 8v3M12 13.5h.01"/>',
+    success: CIRCLE + '<path d="M8 12.5l2.8 2.8L16 10"/>',
+    question: CIRCLE + '<path d="M9.5 9.5a2.5 2.5 0 1 1 3.4 2.3c-.6.3-.9.8-.9 1.4v.3M12 16.5h.01"/>',
+    warning: '<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17h.01"/>',
+    caution: '<path d="M8.3 3h7.4L21 8.3v7.4L15.7 21H8.3L3 15.7V8.3z"/><path d="M12 8v5M12 16h.01"/>',
+    failure: CIRCLE + '<path d="M9 9l6 6M15 9l-6 6"/>',
+    danger: '<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>',
+    bug: '<rect x="8" y="7" width="8" height="13" rx="4"/><path d="M12 7V4M4 11h4M16 11h4M4 17h4M16 17h4M12 11v9"/>',
+    example: '<path d="M9 6h11M9 12h11M9 18h11M4.5 6h.01M4.5 12h.01M4.5 18h.01"/>',
+    quote: '<path d="M5 17c2-1 3-3 3-6V7H4v4h4M14 17c2-1 3-3 3-6V7h-4v4h4"/>',
+  };
+  const EMOJI = new Map((window.MDR_EMOJI || "").split(/[|\n]/).filter(Boolean).map((pair) => {
+    const i = pair.indexOf(" ");
+    return [pair.slice(0, i), pair.slice(i + 1)];
+  }));
 
   // ---------- helpers ----------
 
@@ -142,7 +170,7 @@
         if (this.lexer.state.inLink) return;
         // Not followed by "(" or "[", so citation-style links like [[1]](url) keep working.
         const m = /^(!?)\[\[([^[\]|\n]+?)(?:\|([^[\]\n]+?))?\]\](?![([])/.exec(src);
-        if (!m || !m[2].replace(/#/g, "").trim()) return;
+        if (!m || !m[2].replace(/#/g, "").trim() || m[2] === "_TOC_") return;
         return { type: "wikiLink", raw: m[0], embed: !!m[1], target: m[2].trim(), label: m[3]?.trim() };
       },
       renderer(t) {
@@ -161,6 +189,46 @@
     }],
   };
 
+  // True when the text just before this point ends in a letter, digit, "=" or ":".
+  const followsWord = (tokens) => /[\p{L}\p{N}=:]$/u.test(tokens?.[tokens.length - 1]?.raw || "");
+
+  // ==highlighted text==
+  const highlights = {
+    extensions: [{
+      name: "highlight",
+      level: "inline",
+      // Not right after a letter or digit, so "a==b" and base64 padding stay as they are.
+      start: (src) => {
+        const m = /(^|[^\p{L}\p{N}=])==[^\s=]/u.exec(src);
+        return m ? m.index + m[1].length : undefined;
+      },
+      tokenizer(src, tokens) {
+        if (followsWord(tokens)) return;
+        const m = /^==(?=[^\s=])([^\n`]*?[^\s=`])==(?![=\p{L}\p{N}])/u.exec(src);
+        if (m) return { type: "highlight", raw: m[0], tokens: this.lexer.inlineTokens(m[1]) };
+      },
+      renderer(t) { return `<mark class="highlight">${this.parser.parseInline(t.tokens)}</mark>`; },
+    }],
+  };
+
+  // :tada: and the other GitHub emoji shortcodes in emoji.js.
+  const emoji = {
+    extensions: [{
+      name: "emoji",
+      level: "inline",
+      start: (src) => {
+        const m = /(^|[^\p{L}\p{N}:])(:[a-z0-9_+-]+:)/u.exec(src);
+        return m ? m.index + m[1].length : undefined;
+      },
+      tokenizer(src, tokens) {
+        if (followsWord(tokens)) return;
+        const m = /^:([a-z0-9_+-]+):(?![\p{L}\p{N}])/u.exec(src);
+        if (m && EMOJI.has(m[1])) return { type: "emoji", raw: m[0], text: EMOJI.get(m[1]) };
+      },
+      renderer: (t) => t.text,
+    }],
+  };
+
   // An image alone in its paragraph becomes a figure captioned with its title or alt text.
   const captions = {
     renderer: {
@@ -174,7 +242,7 @@
     },
   };
 
-  marked.use({ gfm: true }, markedFootnote({ description: "Footnotes" }), math, wikiLinks, captions);
+  marked.use({ gfm: true }, markedFootnote({ description: "Footnotes" }), math, wikiLinks, highlights, emoji, captions);
   // For locating headings in the source. Kept separate because lexing with the footnote extension
   // outside marked.parse leaves it in a broken state for the next document.
   const placeLexer = new marked.Marked({ gfm: true }, math);
@@ -238,21 +306,57 @@
       h.prepend(fold);
     });
 
-    // GitHub-style alerts: > [!NOTE]
+    // Alerts and callouts: > [!NOTE], > [!tip] Custom title, > [!faq]- (starts collapsed)
     root.querySelectorAll("blockquote").forEach((bq) => {
       const p = bq.firstElementChild;
-      if (!p || p.tagName !== "P") return;
-      const m = p.innerHTML.match(/^\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(<br>)?\s*/i);
+      const first = p?.tagName === "P" ? p.firstChild : null;
+      const m = first?.nodeType === Node.TEXT_NODE && /^\s*\[!([a-z-]+)\]([+-]?)/i.exec(first.nodeValue);
       if (!m) return;
-      const kind = m[1].toUpperCase();
-      p.innerHTML = p.innerHTML.slice(m[0].length);
-      if (!p.innerHTML.trim()) p.remove();
-      const title = document.createElement("p");
+      const word = m[1].toLowerCase();
+      const kind = CALLOUTS[word] || "note";
+      first.nodeValue = first.nodeValue.slice(m[0].length).replace(/^[ \t]+/, "");
+      // The rest of the first line is the title: move those nodes, up to the line break, into it.
+      const label = document.createElement("span");
+      while (p.firstChild) {
+        const node = p.firstChild;
+        if (node.nodeName === "BR") { node.remove(); break; }
+        if (node.nodeType === Node.TEXT_NODE && node.nodeValue.includes("\n")) {
+          const i = node.nodeValue.indexOf("\n");
+          label.append(node.nodeValue.slice(0, i));
+          node.nodeValue = node.nodeValue.slice(i + 1);
+          break;
+        }
+        label.append(node);
+      }
+      if (!label.textContent.trim() && !label.querySelector("img")) {
+        label.textContent = CALLOUT_LABELS[word] || word[0].toUpperCase() + word.slice(1);
+      }
+      if (!p.textContent.trim() && !p.querySelector("img")) p.remove();
+      const foldable = !!m[2];
+      const title = document.createElement(foldable ? "summary" : "p");
       title.className = "alert-title";
-      title.textContent = ALERTS[kind];
-      bq.prepend(title);
-      bq.classList.add("alert", "alert-" + kind.toLowerCase());
+      title.innerHTML = `<svg class="alert-icon" viewBox="0 0 24 24" aria-hidden="true">${ICONS[kind]}</svg>`;
+      title.append(label);
+      let box = bq;
+      if (foldable) {
+        box = document.createElement("details");
+        box.open = m[2] === "+";
+        box.append(...bq.childNodes);
+        bq.replaceWith(box);
+      }
+      box.prepend(title);
+      box.classList.add("alert", "alert-" + kind);
     });
+
+    // [TOC] (or [[_TOC_]]) on its own line becomes a table of contents.
+    root.querySelectorAll("p").forEach((p) => {
+      if (/^\s*(\[TOC\]|\[\[_?TOC_?\]\])\s*$/i.test(p.textContent) && !p.querySelector("a")) {
+        p.replaceWith(tableOfContents(root));
+      }
+    });
+
+    // Sortable tables: clicking a header sorts by that column.
+    root.querySelectorAll("table thead th").forEach((th) => th.classList.add("sortable"));
 
     // Code blocks: diagrams, math, syntax highlighting + copy button
     root.querySelectorAll("pre > code").forEach((code) => {
@@ -394,6 +498,11 @@
       counters.length = depth + 1;
       h.dataset.num = Array.from(counters, (n) => n || 1).join(".");
     }
+    for (const a of content.querySelectorAll(".toc a")) {
+      const target = anchorTarget(a.getAttribute("href").slice(1));
+      if (target?.dataset.num) a.dataset.num = target.dataset.num;
+      else a.removeAttribute("data-num");
+    }
   }
 
   function sendOutline() {
@@ -461,9 +570,11 @@
     clearFind();
     closeLightbox();
     hideFootnote();
+    hideLinkStatus();
     // Re-rendering the same document (file changed on disk) keeps collapsed sections collapsed.
-    const keepFolds = p.scroll < 0 && !p.source
-      ? [...content.querySelectorAll(".collapsed")].map((h) => h.id) : [];
+    // Re-rendering the same document keeps what's collapsed; otherwise use what the app remembered.
+    const keepFolds = p.scroll < 0 && !p.source && current.doc === (p.path || p.base + "|" + p.title)
+      ? [...content.querySelectorAll(".collapsed")].map((h) => h.id) : p.folds || [];
     if (p.clear) {
       content.replaceChildren();
       content.className = "";
@@ -496,7 +607,10 @@
       numberHeadings();
       blocks = blockSnapshot();
       if (keepFolds.length) {
-        keepFolds.forEach((id) => document.getElementById(id)?.classList.add("collapsed"));
+        keepFolds.forEach((id) => {
+          const h = document.getElementById(id);
+          if (h?.parentElement === content && h.querySelector(".fold")) setFold(h, true);
+        });
         applyFolds();
       }
     }
@@ -510,6 +624,7 @@
     const reposition = () => {
       if (sync) applyPlace(sync);
       else if (edit) { showEdit(edit, flash); flash = false; }
+      else if (p.offset >= 0) applyOffset(p.offset);
       else if (!(p.anchor && scrollToAnchor(p.anchor))) restoreScroll(p.scroll);
     };
     reposition();
@@ -650,14 +765,99 @@
       details.className = "front-matter";
       const summary = document.createElement("summary");
       summary.textContent = "Front matter";
-      const pre = document.createElement("pre");
-      const code = document.createElement("code");
-      code.innerHTML = hljs.highlight(front, { language: "yaml", ignoreIllegals: true }).value;
-      pre.append(code);
-      details.append(summary, pre);
+      const rows = frontMatterRows(front);
+      if (rows) {
+        details.open = true;
+        details.append(summary, frontMatterTable(rows));
+      } else {
+        const pre = document.createElement("pre");
+        const code = document.createElement("code");
+        code.innerHTML = hljs.highlight(front, { language: "yaml", ignoreIllegals: true }).value;
+        pre.append(code);
+        details.append(summary, pre);
+      }
       tpl.content.prepend(details);
     }
     return tpl.content;
+  }
+
+  // Simple YAML (keys with text, [a, b] or "- item" lists) as [{key, values, list}]; null for anything
+  // more complex, which is then shown as YAML.
+  function frontMatterRows(yaml) {
+    const unquote = (v) => v.trim().replace(/^(["'])(.*)\1$/, "$2");
+    const rows = [];
+    for (const line of yaml.split(/\r?\n/)) {
+      if (!line.trim() || /^\s*#/.test(line)) continue;
+      const top = /^([\w][\w .-]*):(?:[ \t]+(.*))?$/.exec(line);
+      if (top) {
+        const value = (top[2] || "").trim();
+        if (/^[|>{]/.test(value)) return null;
+        const list = /^\[(.*)\]$/.exec(value);
+        rows.push({
+          key: top[1],
+          list: !!list,
+          values: list ? list[1].split(",").map(unquote).filter(Boolean) : value ? [unquote(value)] : [],
+        });
+        continue;
+      }
+      const item = /^\s+-\s+(.*)$/.exec(line);
+      const last = rows[rows.length - 1];
+      if (!item || !last || (last.values.length && !last.list) || /:\s/.test(item[1])) return null;
+      last.list = true;
+      last.values.push(unquote(item[1]));
+    }
+    return rows.length ? rows : null;
+  }
+
+  function frontMatterTable(rows) {
+    const table = document.createElement("table");
+    for (const row of rows) {
+      const tr = table.insertRow();
+      const th = document.createElement("th");
+      th.textContent = row.key;
+      const td = tr.insertCell();
+      tr.prepend(th);
+      if (row.list) {
+        for (const value of row.values) {
+          const chip = document.createElement("span");
+          chip.className = "tag";
+          chip.textContent = value;
+          td.append(chip, " ");
+        }
+      } else {
+        td.textContent = row.values.join(" ");
+      }
+    }
+    return table;
+  }
+
+  // Nested list of links to the document's headings (a lone title at the top is left out).
+  function tableOfContents(root) {
+    const all = [...root.querySelectorAll("h1, h2, h3, h4")].filter((h) => !h.closest(".footnotes"));
+    const h1s = all.filter((h) => h.tagName === "H1");
+    const hs = h1s.length === 1 && all[0] === h1s[0] ? all.slice(1) : all;
+    const nav = document.createElement("nav");
+    nav.className = "toc";
+    if (!hs.length) return nav;
+    const base = Math.min(...hs.map(headingLevel));
+    const lists = [document.createElement("ul")];
+    nav.append(lists[0]);
+    for (const h of hs) {
+      const depth = headingLevel(h) - base;
+      while (lists.length > depth + 1) lists.pop();
+      while (lists.length < depth + 1) {
+        const parent = lists[lists.length - 1];
+        const holder = parent.lastElementChild || parent.appendChild(document.createElement("li"));
+        lists.push(holder.appendChild(document.createElement("ul")));
+      }
+      const li = document.createElement("li");
+      const a = document.createElement("a");
+      a.href = "#" + encodeURIComponent(h.id);
+      a.textContent = h.textContent.trim();
+      li.append(a);
+      lists[lists.length - 1].append(li);
+    }
+    return nav;
   }
 
   // ---------- find in page ----------
@@ -805,11 +1005,32 @@
     return Math.min(...[...el.querySelectorAll("h1, h2, h3, h4, h5, h6")].map(headingLevel));
   }
 
-  function toggleFold(heading) {
-    heading.classList.toggle("collapsed");
-    heading.querySelector(".fold")?.setAttribute(
-      "aria-label", heading.classList.contains("collapsed") ? "Expand section" : "Collapse section");
+  function setFold(heading, collapsed) {
+    heading.classList.toggle("collapsed", collapsed);
+    heading.querySelector(".fold")?.setAttribute("aria-label", collapsed ? "Expand section" : "Collapse section");
+  }
+
+  // With ⌥, every section at the same level follows the clicked one.
+  function toggleFold(heading, sameLevel) {
+    const collapsed = !heading.classList.contains("collapsed");
+    const targets = sameLevel
+      ? topHeadings().filter((h) => h.tagName === heading.tagName && h.querySelector(".fold"))
+      : [heading];
+    targets.forEach((h) => setFold(h, collapsed));
     applyFolds();
+    sendFolds();
+  }
+
+  function foldAll(collapsed) {
+    if (!content.classList.contains("markdown-body")) return;
+    topHeadings().filter((h) => h.querySelector(".fold")).forEach((h) => setFold(h, collapsed));
+    applyFolds();
+    sendFolds();
+  }
+
+  // The app remembers collapsed sections per file.
+  function sendFolds() {
+    post({ type: "folds", ids: [...content.querySelectorAll(":scope > .collapsed")].map((h) => h.id) });
   }
 
   // Expand whatever collapsed sections contain `el`.
@@ -829,6 +1050,85 @@
       limit = level;
     }
     if (changed) applyFolds();
+  }
+
+  // ---------- sortable tables ----------
+
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+  // Plain numbers like 12, 1,234.5, $10 or 45%; anything else (versions, dates) sorts as text.
+  const asNumber = (s) => (/^[-+]?[$€£¥]?\s*(\d{1,3}(,\d{3})+|\d+)(\.\d+)?\s*%?$/.test(s)
+    ? parseFloat(s.replace(/[^\d.+-]/g, "")) : NaN);
+
+  // Ascending, then descending. Numbers (with currency or % signs) sort by value; empty cells last.
+  function sortTable(th) {
+    const table = th.closest("table");
+    const body = table.tBodies[0];
+    if (!body) return;
+    const column = [...th.parentElement.children].indexOf(th);
+    const descending = th.dataset.sort === "asc";
+    table.querySelectorAll("th[data-sort]").forEach((h) => h.removeAttribute("data-sort"));
+    th.dataset.sort = descending ? "desc" : "asc";
+    const cell = (row) => row.cells[column]?.textContent.trim() ?? "";
+    const rows = [...body.rows].sort((a, b) => {
+      const x = cell(a), y = cell(b);
+      if (!x || !y) return !x - !y;
+      const nx = asNumber(x), ny = asNumber(y);
+      const order = !isNaN(nx) && !isNaN(ny) ? nx - ny : collator.compare(x, y);
+      return descending ? -order : order;
+    });
+    body.append(...rows);
+  }
+
+  // ---------- diagrams: copy and save ----------
+
+  function diagramAt(index) {
+    return content.querySelectorAll(".mermaid-block:not(.failed)")[index]?.querySelector("svg") || null;
+  }
+
+  function diagramSVG(index) {
+    const svg = diagramAt(index);
+    if (!svg) return null;
+    const copy = svg.cloneNode(true);
+    copy.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' + new XMLSerializer().serializeToString(copy);
+  }
+
+  // Where the diagram is on the page (not the window), for an image of it.
+  function diagramRect(index) {
+    const svg = diagramAt(index);
+    if (!svg) return null;
+    const r = svg.getBoundingClientRect();
+    return { x: r.left + window.scrollX, y: r.top + window.scrollY, width: r.width, height: r.height };
+  }
+
+  // ---------- link preview ----------
+
+  let linkStatus = null;
+
+  // Where a link goes: the web address, or the file path relative to the document.
+  function describeLink(a) {
+    const href = a.getAttribute("href");
+    if (href.startsWith("#")) return href;
+    if (a.protocol === "mailto:") return a.href.slice(7);
+    if (a.protocol !== "file:") return a.href;
+    const folder = document.baseURI.replace(/[^/]*$/, "");
+    let text = a.href.startsWith(folder) ? a.href.slice(folder.length) : a.href.replace(/^file:\/\//, "");
+    try { text = decodeURIComponent(text); } catch (_) {}
+    return text;
+  }
+
+  function showLinkStatus(a) {
+    if (!linkStatus) {
+      linkStatus = document.createElement("div");
+      linkStatus.id = "link-status";
+      document.body.append(linkStatus);
+    }
+    linkStatus.textContent = describeLink(a) + (a.classList.contains("broken") ? " (not found)" : "");
+    linkStatus.hidden = false;
+  }
+
+  function hideLinkStatus() {
+    if (linkStatus) linkStatus.hidden = true;
   }
 
   // ---------- reading progress ----------
@@ -925,13 +1225,22 @@
   function sourceHeadings(md) {
     if (headingCache.md === md) return headingCache.list;
     const [, body] = splitFrontMatter(md);
-    let pos = md.length - body.length;
+    const start = md.length - body.length;
+    // marked turns \r\n into \n before measuring; add the \r back to get offsets in `md`.
+    const crlf = [];
+    for (let i = body.indexOf("\r\n"); i >= 0; i = body.indexOf("\r\n", i + 2)) crlf.push(i - crlf.length);
+    const original = (offset) => {
+      let lo = 0, hi = crlf.length;
+      while (lo < hi) { const mid = (lo + hi) >> 1; if (crlf[mid] < offset) lo = mid + 1; else hi = mid; }
+      return start + offset + lo;
+    };
+    let pos = 0;
     const list = [];
     const scratch = document.createElement("template");
     for (const token of placeLexer.lexer(body)) {
       if (token.type === "heading") {
         scratch.innerHTML = placeLexer.parseInline(token.text);
-        list.push({ offset: pos, level: token.depth, text: scratch.content.textContent.trim() });
+        list.push({ offset: original(pos), level: token.depth, text: scratch.content.textContent.trim() });
       }
       pos += token.raw.length;
     }
@@ -941,6 +1250,36 @@
 
   function headingOffsets(md) {
     return sourceHeadings(md).map((h) => h.offset);
+  }
+
+  // Character offset in the Markdown of what's at the top of the window (for the editor).
+  function placeOffset() {
+    if (current.source) return sourceOffsetAtTop() ?? 0;
+    const place = readPlace();
+    const offset = headingOffsets(current.md)[place.index];
+    return offset ?? Math.round(place.ratio * current.md.length);
+  }
+
+  // Character offset of an outline entry's heading, or null.
+  function headingOffset(id) {
+    const offsets = headingOffsets(current.md);
+    const m = /^source-(\d+)$/.exec(id);
+    if (m) return offsets[Number(m[1])] ?? null;
+    const hs = topHeadings();
+    const i = hs.findIndex((h) => h.id === id);
+    return i >= 0 && hs.length === offsets.length ? offsets[i] : null;
+  }
+
+  // Shows the part of the document at a character offset (coming back from the editor).
+  function applyOffset(offset) {
+    if (current.source) {
+      const y = sourceOffsetY(Math.min(offset, Math.max(0, current.md.length - 1)));
+      if (y !== null) window.scrollTo(0, Math.max(0, y - 12));
+      return;
+    }
+    let index = -1;
+    headingOffsets(current.md).forEach((o, i) => { if (o <= offset) index = i; });
+    applyPlace({ index, ratio: offset / Math.max(1, current.md.length) });
   }
 
   const maxScroll = () => Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
@@ -1071,9 +1410,13 @@
   document.addEventListener("mouseover", (e) => {
     const ref = e.target.closest?.("[data-footnote-ref]");
     if (ref) showFootnote(ref);
+    const a = e.target.closest?.("a[href]");
+    if (a && content.contains(a)) showLinkStatus(a);
   });
   document.addEventListener("mouseout", (e) => {
     if (e.target.closest?.("[data-footnote-ref]")) hideFootnote();
+    const a = e.target.closest?.("a[href]");
+    if (a && !a.contains(e.relatedTarget)) hideLinkStatus();
   });
 
   // ---------- horizontal scrolling hint ----------
@@ -1154,7 +1497,12 @@
     }
     const fold = e.target.closest(".fold");
     if (fold) {
-      toggleFold(fold.parentElement);
+      toggleFold(fold.parentElement, e.altKey);
+      return;
+    }
+    const th = e.target.closest(".markdown-body th.sortable");
+    if (th && !e.target.closest("a")) {
+      sortTable(th);
       return;
     }
     const a = e.target.closest("a[href]");
@@ -1178,7 +1526,10 @@
   // Tell the app which heading was right-clicked, for "Copy Link to Heading".
   document.addEventListener("contextmenu", (e) => {
     const h = e.target.closest?.(".markdown-body :is(h1, h2, h3, h4, h5, h6)");
-    post({ type: "context", heading: h && !h.closest(".footnotes") ? h.id : "" });
+    const block = e.target.closest?.(".mermaid-block:not(.failed)");
+    const diagram = block?.querySelector("svg")
+      ? [...content.querySelectorAll(".mermaid-block:not(.failed)")].indexOf(block) : -1;
+    post({ type: "context", heading: h && !h.closest(".footnotes") ? h.id : "", diagram });
   });
 
   let scrollTimer = null;
@@ -1214,6 +1565,7 @@
   window.mdr = {
     render: (p) => (lastRender = render(p).catch(() => {})),
     setOptions, find, findStep, clearFind, exportHTML, preparePrint, afterPrint, markBroken,
+    foldAll, diagramSVG, diagramRect, placeOffset, headingOffset,
     scrollToAnchor: (id) => scrollToAnchor(id, true),
     scrollTo: (y) => window.scrollTo(0, y),
     scrollY: () => window.scrollY,

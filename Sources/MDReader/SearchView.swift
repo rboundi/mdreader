@@ -42,8 +42,8 @@ final class SearchModel: ObservableObject {
     @Published var focusToken = UUID()
 
     private var task: Task<Void, Never>?
-    private static let perFile = 100
-    private static let totalLimit = 1000
+    nonisolated private static let perFile = 100
+    nonisolated private static let totalLimit = 1000
 
     func run(delay: Double = 0.2) {
         task?.cancel()

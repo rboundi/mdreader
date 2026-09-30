@@ -14,6 +14,9 @@
 
 **Reading**
 - GitHub-flavored Markdown: tables, task lists, strikethrough, footnotes, alerts (`> [!NOTE]`), heading anchors, relative images and YAML front matter
+- Obsidian callouts (`> [!tip] Title`, `> [!faq]-` to start collapsed), `==highlights==` and `:emoji:` shortcodes
+- `[TOC]` on its own line inserts a table of contents
+- Front matter shows as a small table
 - Wiki links: `[[Note]]`, `[[Note|label]]` and `[[Note#Heading]]` open `Note.md` from the same folder
 - An image on its own line gets its alt text as a caption
 - Links to missing files or headings are struck through
@@ -23,8 +26,12 @@
 - Rendered or Markdown source view (<kbd>⌘</kbd><kbd>/</kbd>), staying at the same section, with optional line numbers
 - Focus mode hides the tabs, toolbar and sidebar (<kbd>⇧</kbd><kbd>⌘</kbd><kbd>F</kbd>, <kbd>Esc</kbd> to leave)
 - Footnotes show on hover
-- Sidebar with the document outline or the other Markdown files in the folder
-- Collapsible sections, image zoom and a reading progress bar
+- Sidebar with the document outline or the other Markdown files in the folder. Drag its edge to resize it
+- Collapsible sections, remembered per file. **View → Collapse All Sections**, or <kbd>⌥</kbd>-click an arrow to fold every section at that level
+- Click a table header to sort by that column
+- Right-click a diagram to copy it or save it as PNG or SVG
+- Hover a link to see where it goes
+- Image zoom and a reading progress bar
 - Optional heading numbers (1, 1.1, 1.2) in the document and the outline
 - Keyboard reading: <kbd>j</kbd> / <kbd>k</kbd> to scroll, <kbd>n</kbd> / <kbd>p</kbd> for the next or previous heading, <kbd>g</kbd> / <kbd>G</kbd> for the top or bottom
 - Back and Forward after following links, also with a two-finger swipe or the mouse side buttons
@@ -36,7 +43,7 @@
 - Find in page, and search across open tabs or the folder (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>F</kbd>)
 
 **Tabs**
-- Drag to reorder, right-click to close others or reveal in Finder
+- Drag to reorder, or drag a tab to Finder or another app to use the file. Right-click to close others or reveal in Finder
 - Quick Open (<kbd>⌘</kbd><kbd>P</kbd>) for open tabs, recent files and files in the same folder
 - Reopen closed tabs with <kbd>⇧</kbd><kbd>⌘</kbd><kbd>T</kbd> or from **File → Recently Closed**
 - Tabs are restored on relaunch
@@ -53,8 +60,11 @@
 - Sans or serif font, text size and text width
 - Your own styles in `~/Library/Application Support/MDReader/custom.css` (**Settings → Custom CSS → Edit…**)
 
+**Editing**
+- **Edit** (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>O</kbd>) switches to a plain text editor; <kbd>⌘</kbd><kbd>S</kbd> saves
+- To edit in another app instead, choose it in **Settings → Edit with**. Changes show as soon as you save
+
 **Other**
-- Edit in your editor of choice (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>O</kbd>); changes show as soon as you save
 - Share button for Mail, Messages and AirDrop
 - Open a folder to read its README with the other files in the sidebar
 - `mdr` command: `mdr README.md`, `mdr docs` or `cat notes.md | mdr`
@@ -99,7 +109,8 @@ Select a `.md` file in Finder, press <kbd>⌘</kbd><kbd>I</kbd>, choose MDReader
 | Open Clipboard | <kbd>⇧</kbd><kbd>⌘</kbd><kbd>V</kbd> |
 | Back / Forward | <kbd>⌘</kbd><kbd>[</kbd> / <kbd>⌘</kbd><kbd>]</kbd> |
 | Jump to Heading | <kbd>⇧</kbd><kbd>⌘</kbd><kbd>J</kbd> |
-| Edit in editor | <kbd>⌥</kbd><kbd>⌘</kbd><kbd>O</kbd> |
+| Edit / stop editing | <kbd>⌥</kbd><kbd>⌘</kbd><kbd>O</kbd> |
+| Save | <kbd>⌘</kbd><kbd>S</kbd> |
 | Focus mode | <kbd>⇧</kbd><kbd>⌘</kbd><kbd>F</kbd> |
 | Close tab / reopen closed tab | <kbd>⌘</kbd><kbd>W</kbd> / <kbd>⇧</kbd><kbd>⌘</kbd><kbd>T</kbd> |
 | Next / previous tab | <kbd>⌃</kbd><kbd>Tab</kbd> / <kbd>⌃</kbd><kbd>⇧</kbd><kbd>Tab</kbd> |
@@ -137,6 +148,7 @@ Sources/MDReader/
   SearchView.swift        Search across tabs or the folder
   OutlineView.swift       Outline
   PaletteView.swift       Quick Open and Jump to Heading
+  EditorView.swift        The text editor
   HTMLExport.swift        HTML export and rich-text copy
   UpdateChecker.swift     Release check
   SettingsView.swift      Settings window
