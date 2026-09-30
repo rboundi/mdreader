@@ -9,6 +9,8 @@ final class DocTab: Identifiable {
     var showSource = false
     /// Heading to jump to on the next render (from a link like `other.md#setup`).
     var pendingAnchor: String?
+    /// Scroll position to restore on the next render (Back/Forward, reopened files).
+    var pendingScroll: Double?
     private(set) var wordCount = 0
     /// Called after the file's contents change on disk.
     var onChange: (() -> Void)?

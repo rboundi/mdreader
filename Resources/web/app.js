@@ -70,6 +70,7 @@
     if (!target) {
       try { target = document.getElementById(decodeURIComponent(id)); } catch (_) {}
     }
+    if (target) reveal(target);
     target?.scrollIntoView?.({ behavior: smooth ? "smooth" : "auto", block: "start" });
     return !!target;
   }
@@ -159,11 +160,12 @@
         h.id = id;
       }
       taken.add(h.id);
-      const a = document.createElement("a");
-      a.className = "anchor";
-      a.href = "#" + h.id;
-      a.setAttribute("aria-hidden", "true");
-      h.prepend(a);
+      if (h.closest(".footnotes")) return;
+      const fold = document.createElement("button");
+      fold.className = "fold";
+      fold.type = "button";
+      fold.setAttribute("aria-label", "Collapse section");
+      h.prepend(fold);
     });
 
     // GitHub-style alerts: > [!NOTE]
@@ -314,6 +316,7 @@
       current = all[all.length - 1].id;
     } else {
       for (const h of all) {
+        if (h.classList.contains("folded-away")) continue;
         if (h.getBoundingClientRect().top <= 90) current = h.id;
         else break;
       }
@@ -371,6 +374,7 @@
       content.replaceChildren(renderMarkdown(p.md));
     }
     sendOutline();
+    updateProgress();
     const reposition = () => {
       if (!(p.anchor && scrollToAnchor(p.anchor))) restoreScroll(p.scroll);
     };
@@ -390,6 +394,7 @@
     if (token !== renderToken || Math.abs(window.scrollY - startY) > 40) return;
     reposition();
     updateActive();
+    updateProgress();
   }
 
   function imagesLoaded(images, timeout) {
@@ -447,6 +452,7 @@
     const el = found.marks[found.index];
     if (!el) return;
     el.closest("details")?.setAttribute("open", "");
+    reveal(el);
     el.scrollIntoView?.({ block: "center" });
   }
 
@@ -499,7 +505,8 @@
   async function exportHTML() {
     await lastRender;
     const clone = content.cloneNode(true);
-    clone.querySelectorAll(".copy-btn, .anchor, .front-matter").forEach((el) => el.remove());
+    clone.querySelectorAll(".copy-btn, .fold, .front-matter").forEach((el) => el.remove());
+    clone.querySelectorAll(".folded-away, .collapsed").forEach((el) => el.classList.remove("folded-away", "collapsed"));
     clone.querySelectorAll("mark.mdr-find").forEach((m) => m.replaceWith(m.textContent));
     const images = [];
     const live = content.querySelectorAll("img[src]");
@@ -537,10 +544,89 @@
     if (prefersDark() && diagramTheme === "default") await renderDiagrams(content, "dark");
   }
 
+  // ---------- collapsible sections ----------
+
+  const headingLevel = (el) => (/^H[1-6]$/.test(el.tagName) ? Number(el.tagName[1]) : 0);
+
+  // Hide everything after a collapsed heading up to the next heading of the same or higher level.
+  function applyFolds() {
+    let hideBelow = 0;
+    for (const child of content.children) {
+      const level = headingLevel(child);
+      if (level && hideBelow && level <= hideBelow) hideBelow = 0;
+      child.classList.toggle("folded-away", hideBelow > 0);
+      if (level && !hideBelow && child.classList.contains("collapsed")) hideBelow = level;
+    }
+    updateProgress();
+  }
+
+  function toggleFold(heading) {
+    heading.classList.toggle("collapsed");
+    heading.querySelector(".fold")?.setAttribute(
+      "aria-label", heading.classList.contains("collapsed") ? "Expand section" : "Collapse section");
+    applyFolds();
+  }
+
+  // Expand whatever collapsed sections contain `el`.
+  function reveal(el) {
+    let block = el;
+    while (block.parentElement && block.parentElement !== content) block = block.parentElement;
+    if (block.parentElement !== content) return;
+    let limit = headingLevel(block) || 7;
+    let changed = false;
+    for (let prev = block.previousElementSibling; prev && limit > 1; prev = prev.previousElementSibling) {
+      const level = headingLevel(prev);
+      if (!level || level >= limit) continue;
+      if (prev.classList.contains("collapsed")) {
+        prev.classList.remove("collapsed");
+        changed = true;
+      }
+      limit = level;
+    }
+    if (changed) applyFolds();
+  }
+
+  // ---------- reading progress ----------
+
+  let progressBar = null;
+  let progressQueued = false;
+
+  function updateProgress() {
+    if (progressQueued || !progressBar) return;
+    progressQueued = true;
+    requestAnimationFrame(() => {
+      progressQueued = false;
+      const max = document.documentElement.scrollHeight - window.innerHeight;
+      progressBar.style.transform = `scaleX(${max > 0 ? Math.min(1, window.scrollY / max) : 0})`;
+      progressBar.hidden = max <= 0;
+    });
+  }
+
+  // ---------- image zoom ----------
+
+  function openLightbox(img) {
+    const box = document.createElement("div");
+    box.className = "lightbox";
+    const big = document.createElement("img");
+    big.src = img.currentSrc || img.src;
+    big.alt = img.alt;
+    box.append(big);
+    box.addEventListener("click", () => box.remove());
+    document.body.append(box);
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") document.querySelector(".lightbox")?.remove();
+  });
+
   // ---------- events ----------
 
   function setOptions(o) {
     if (o.font) document.body.dataset.font = o.font;
+    if (o.theme !== undefined) {
+      if (o.theme) document.documentElement.dataset.theme = o.theme;
+      else delete document.documentElement.dataset.theme;
+    }
     if (o.width !== undefined) {
       document.documentElement.style.setProperty("--content-width", o.width > 0 ? o.width + "px" : "none");
     }
@@ -556,20 +642,39 @@
       setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("done"); }, 1200);
       return;
     }
+    const fold = e.target.closest(".fold");
+    if (fold) {
+      toggleFold(fold.parentElement);
+      return;
+    }
     const a = e.target.closest("a[href]");
+    const img = e.target.closest(".markdown-body img");
+    if (img && !a) {
+      openLightbox(img);
+      return;
+    }
     if (!a) return;
     e.preventDefault();
     const href = a.getAttribute("href");
+    // The app records the position we're leaving, for Back and Forward.
     if (href.startsWith("#")) {
+      post({ type: "anchor", y: window.scrollY });
       scrollToAnchor(href.slice(1), true);
       return;
     }
-    post({ type: "link", href: a.href });
+    post({ type: "link", href: a.href, y: window.scrollY });
+  });
+
+  // Tell the app which heading was right-clicked, for "Copy Link to Heading".
+  document.addEventListener("contextmenu", (e) => {
+    const h = e.target.closest?.(".markdown-body :is(h1, h2, h3, h4, h5, h6)");
+    post({ type: "context", heading: h && !h.closest(".footnotes") ? h.id : "" });
   });
 
   let scrollTimer = null;
   window.addEventListener("scroll", () => {
     if (scrollTimer) return;
+    updateProgress();
     scrollTimer = setTimeout(() => {
       scrollTimer = null;
       post({ type: "scroll", y: window.scrollY });
@@ -581,13 +686,21 @@
     if (content.querySelector(".mermaid-block")) renderDiagrams(content);
   });
 
+  window.addEventListener("resize", updateProgress);
+
   document.addEventListener("DOMContentLoaded", () => {
     content = document.getElementById("content");
+    progressBar = document.createElement("div");
+    progressBar.id = "progress";
+    progressBar.hidden = true;
+    document.body.append(progressBar);
   });
 
   window.mdr = {
     render: (p) => (lastRender = render(p).catch(() => {})),
     setOptions, find, findStep, clearFind, exportHTML, preparePrint, afterPrint,
     scrollToAnchor: (id) => scrollToAnchor(id, true),
+    scrollTo: (y) => window.scrollTo(0, y),
+    scrollY: () => window.scrollY,
   };
 })();

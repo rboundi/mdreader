@@ -65,6 +65,30 @@
   }
 }
 
+:root[data-theme="sepia"] {
+  color-scheme: light;
+  --bg: #f7f0e3;
+  --fg: #3d3326;
+  --muted: #7a6b57;
+  --border: #dccfb8;
+  --border-soft: #e8dcc6;
+  --surface: #efe5d3;
+  --code-bg: #eee3cf;
+  --link: #9a4a14;
+  --mark: #f4d58d;
+  --mark-current: #e7a33e;
+  --selection: #e6d3b0;
+
+  --hl-keyword: #a3361c;
+  --hl-string: #5b6b1f;
+  --hl-number: #8a4f0f;
+  --hl-comment: #8f806a;
+  --hl-title: #7a3e8e;
+  --hl-attr: #95551a;
+  --hl-type: #2f6a5a;
+  --hl-meta: #6b5a3a;
+}
+
 * { box-sizing: border-box; }
 
 html { background: var(--bg); }
@@ -113,16 +137,36 @@ body[data-font="serif"] .markdown-body :is(h1, h2, h3, h4, h5, h6) { font-family
 .markdown-body h5 { font-size: 0.95em; }
 .markdown-body h6 { font-size: 0.9em; color: var(--muted); }
 
-.markdown-body .anchor {
+/* Collapse button in the left margin of each heading. */
+.markdown-body .fold {
   position: absolute;
-  left: -1.1em;
-  width: 1em;
-  text-decoration: none;
+  left: -1.4em;
+  top: 50%;
+  width: 1.1em;
+  height: 1.1em;
+  margin-top: -0.55em;
+  padding: 0;
+  border: 0;
+  background: none;
   color: var(--muted);
+  cursor: pointer;
   opacity: 0;
+  transition: opacity 0.15s, transform 0.15s;
 }
-.markdown-body .anchor::before { content: "#"; }
-.markdown-body :is(h1, h2, h3, h4, h5, h6):hover .anchor { opacity: 0.6; }
+.markdown-body .fold::before {
+  content: "";
+  display: block;
+  width: 0.38em;
+  height: 0.38em;
+  margin: 0.3em auto 0;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+}
+.markdown-body :is(h1, h2, h3, h4, h5, h6):hover .fold { opacity: 0.7; }
+.markdown-body .collapsed .fold { opacity: 0.7; transform: rotate(-90deg); }
+.markdown-body .collapsed { color: var(--muted); }
+@media screen { .markdown-body > .folded-away { display: none !important; } }
 
 .markdown-body a { color: var(--link); text-decoration: none; }
 .markdown-body a:hover { text-decoration: underline; }
@@ -273,7 +317,6 @@ pre:hover .copy-btn { opacity: 1; }
   border: 0;
   padding: 0;
 }
-.markdown-body .footnotes .anchor { display: none; }
 .markdown-body [data-footnote-ref] { font-size: 0.75em; text-decoration: none; }
 .markdown-body [data-footnote-ref]::before { content: "["; }
 .markdown-body [data-footnote-ref]::after { content: "]"; }
@@ -287,6 +330,35 @@ pre:hover .copy-btn { opacity: 1; }
 .markdown-body .mermaid-block.failed { text-align: left; }
 .markdown-body .diagram-error { color: var(--caution); font-size: 0.85em; }
 
+/* ---------- reading progress & image zoom ---------- */
+
+#progress {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--link);
+  transform-origin: left;
+  transform: scaleX(0);
+  z-index: 10;
+}
+
+.markdown-body img { cursor: zoom-in; }
+.markdown-body a img { cursor: pointer; }
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  cursor: zoom-out;
+}
+.lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.35); }
+
 /* ---------- find ---------- */
 
 mark.mdr-find { background: var(--mark); color: inherit; border-radius: 2px; }
@@ -295,7 +367,7 @@ mark.mdr-find.current { background: var(--mark-current); color: #000; }
 /* ---------- print / PDF: always light, no UI chrome ---------- */
 
 @media print {
-  :root {
+  :root, :root[data-theme] {
     --bg: #ffffff; --fg: #1f2328; --muted: #59636e; --border: #d1d9e0; --border-soft: #e6eaef;
     --surface: #f6f8fa; --code-bg: #f3f4f6; --link: #0969da;
     --hl-keyword: #cf222e; --hl-string: #0a3069; --hl-number: #0550ae; --hl-comment: #6e7781;
@@ -306,7 +378,7 @@ mark.mdr-find.current { background: var(--mark-current); color: #000; }
   html, body { background: #fff !important; }
   body { font-size: 11.5pt; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   #content { max-width: none; padding: 0; }
-  .copy-btn, .anchor, .front-matter { display: none !important; }
+  .copy-btn, .fold, .front-matter, #progress, .lightbox { display: none !important; }
   mark.mdr-find { background: none; }
   .markdown-body pre, .source-view pre { white-space: pre-wrap; word-wrap: break-word; overflow: visible; }
   .markdown-body .table-wrap { overflow: visible; }

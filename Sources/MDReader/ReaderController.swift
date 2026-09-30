@@ -7,7 +7,10 @@ import UniformTypeIdentifiers
 @MainActor
 final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
     let webView: ReaderWebView
-    var onOpenFile: ((URL, String?) -> Void)?
+    /// A Markdown link was followed: file, heading id, and the scroll position being left.
+    var onOpenFile: ((URL, String?, Double?) -> Void)?
+    /// An in-page link was followed from this scroll position.
+    var onNavigate: ((Double) -> Void)?
     var onOutline: (([OutlineItem]) -> Void)?
     var onActiveHeading: ((String?) -> Void)?
     var onDisplay: (() -> Void)?
@@ -20,6 +23,7 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
     private var scrollPositions: [String: Double] = [:]
     private var appliedFont: ReadingFont?
     private var appliedWidth: ContentWidth?
+    private var appliedTheme: String?
     private var printCompletion: ((Bool) -> Void)?
 
     override init() {
@@ -58,8 +62,14 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
             return
         }
         let key = "\(tab.id)|\(tab.showSource)"
-        // Same document + mode: keep the reader where it is (e.g. file changed on disk).
-        let scroll: Double = key == currentKey ? -1 : (scrollPositions[key] ?? 0)
+        let scroll: Double
+        if let pending = tab.pendingScroll {
+            scroll = pending
+            tab.pendingScroll = nil
+        } else {
+            // Same document + mode: keep the reader where it is (e.g. file changed on disk).
+            scroll = key == currentKey ? -1 : (scrollPositions[key] ?? 0)
+        }
         currentKey = key
         defer { onDisplay?() }
         let anchor = tab.pendingAnchor ?? ""
@@ -91,6 +101,17 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
             completionHandler: nil)
     }
 
+    /// Last known scroll position of a tab's rendered view.
+    func lastScroll(for tab: DocTab) -> Double? {
+        scrollPositions["\(tab.id)|false"]
+    }
+
+    func scrollTo(_ y: Double) {
+        if let key = currentKey { scrollPositions[key] = y }
+        webView.callAsyncJavaScript(
+            "window.mdr.scrollTo(y)", arguments: ["y": y], in: nil, in: .page, completionHandler: nil)
+    }
+
     func scrollToAnchor(_ id: String) {
         webView.callAsyncJavaScript(
             "window.mdr.scrollToAnchor(id)", arguments: ["id": id], in: nil, in: .page,
@@ -100,12 +121,14 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
     private func applyOptions() {
         let font = Prefs.font
         let width = Prefs.width
-        if ready, font != appliedFont || width != appliedWidth {
+        let theme = Prefs.appearanceMode == .sepia ? "sepia" : ""
+        if ready, font != appliedFont || width != appliedWidth || theme != appliedTheme {
             appliedFont = font
             appliedWidth = width
+            appliedTheme = theme
             webView.callAsyncJavaScript(
                 "window.mdr.setOptions(o)",
-                arguments: ["o": ["font": font.rawValue, "width": width.pixels]], in: nil,
+                arguments: ["o": ["font": font.rawValue, "width": width.pixels, "theme": theme]], in: nil,
                 in: .page, completionHandler: nil)
         }
         if abs(webView.pageZoom - Prefs.zoomLevel) > 0.001 {
@@ -242,6 +265,7 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
         ready = true
         appliedFont = nil
         appliedWidth = nil
+        appliedTheme = nil
         applyOptions()
         if let payload = pendingRender {
             pendingRender = nil
@@ -298,8 +322,12 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
             onActiveHeading?(id?.isEmpty == false ? id : nil)
         case "link":
             if let href = body["href"] as? String, let url = URL(string: href) {
-                handleLink(url)
+                handleLink(url, from: (body["y"] as? NSNumber)?.doubleValue)
             }
+        case "anchor":
+            if let y = body["y"] as? NSNumber { onNavigate?(y.doubleValue) }
+        case "context":
+            webView.contextHeading = body["heading"] as? String ?? ""
         case "copy":
             if let text = body["text"] as? String {
                 NSPasteboard.general.clearContents()
@@ -310,7 +338,7 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
         }
     }
 
-    private func handleLink(_ url: URL) {
+    private func handleLink(_ url: URL, from y: Double? = nil) {
         if url.isFileURL {
             var clean = URLComponents(url: url, resolvingAgainstBaseURL: false)
             let fragment = clean?.fragment
@@ -318,7 +346,7 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
             clean?.query = nil
             guard let fileURL = clean?.url else { return }
             if MarkdownFiles.isMarkdown(fileURL) {
-                onOpenFile?(fileURL, fragment)
+                onOpenFile?(fileURL, fragment, y)
             } else if !FileManager.default.fileExists(atPath: fileURL.path) {
                 NSSound.beep()
             } else if MarkdownFiles.isSafeToOpen(fileURL) {
@@ -362,6 +390,11 @@ enum MarkdownFiles {
     ]
     static func isMarkdown(_ url: URL) -> Bool {
         extensions.contains(url.pathExtension.lowercased())
+    }
+
+    /// Markdown proper, for the Files sidebar (leaves out .txt and .text).
+    static func isMarkdownDocument(_ url: URL) -> Bool {
+        isMarkdown(url) && !["txt", "text"].contains(url.pathExtension.lowercased())
     }
 
     static let maxFileSize = 20 * 1024 * 1024
@@ -410,6 +443,9 @@ enum MarkdownFiles {
 /// WKWebView that accepts dropped files as new tabs and trims browser-only context menu items.
 final class ReaderWebView: WKWebView {
     var onDropFiles: (([URL]) -> Void)?
+    var onCopyHeadingLink: ((String) -> Void)?
+    /// Id of the heading under the last right-click, reported by the page just before the menu opens.
+    var contextHeading = ""
 
     private static let hiddenMenuItems = [
         "Reload", "GoBack", "GoForward", "OpenLink", "OpenImage", "DownloadLinked", "DownloadImage",
@@ -423,7 +459,19 @@ final class ReaderWebView: WKWebView {
         }
         while menu.items.first?.isSeparatorItem == true { menu.removeItem(at: 0) }
         while menu.items.last?.isSeparatorItem == true { menu.removeItem(at: menu.items.count - 1) }
+        if !contextHeading.isEmpty {
+            let item = NSMenuItem(title: "Copy Link to Heading", action: #selector(copyHeadingLink(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = contextHeading
+            menu.insertItem(item, at: 0)
+            if menu.items.count > 1 { menu.insertItem(.separator(), at: 1) }
+        }
+        contextHeading = ""
         super.willOpenMenu(menu, with: event)
+    }
+
+    @objc private func copyHeadingLink(_ sender: NSMenuItem) {
+        if let id = sender.representedObject as? String { onCopyHeadingLink?(id) }
     }
 
     private func fileURLs(_ info: NSDraggingInfo) -> [URL] {

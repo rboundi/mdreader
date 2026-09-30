@@ -6,12 +6,6 @@ struct OutlineView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("OUTLINE")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 14)
-                .padding(.top, 12)
-                .padding(.bottom, 6)
             if state.selected?.showSource == true {
                 placeholder("Not available in Markdown view")
             } else if state.outline.isEmpty {
@@ -34,9 +28,7 @@ struct OutlineView: View {
             }
             Spacer(minLength: 0)
         }
-        .frame(width: 230)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Color(nsColor: .windowBackgroundColor))
     }
 
     private func row(_ item: OutlineItem) -> some View {

@@ -1,6 +1,10 @@
 import AppKit
 import UniformTypeIdentifiers
 
+enum SidebarPane: String {
+    case outline, files
+}
+
 struct Toast: Equatable {
     let id = UUID()
     let message: String
@@ -17,6 +21,7 @@ final class AppState: ObservableObject {
             guard selectedID != oldValue else { return }
             reader.display(selected)
             persistTabs()
+            refreshFolder()
         }
     }
     @Published private(set) var recents: [URL] = []
@@ -24,9 +29,19 @@ final class AppState: ObservableObject {
     @Published var findVisible = false
     @Published private(set) var outline: [OutlineItem] = []
     @Published private(set) var activeHeading: String?
-    @Published var outlineVisible = UserDefaults.standard.bool(forKey: Prefs.outlineVisible) {
-        didSet { UserDefaults.standard.set(outlineVisible, forKey: Prefs.outlineVisible) }
+    @Published var sidebarVisible = UserDefaults.standard.bool(forKey: Prefs.outlineVisible) {
+        didSet { UserDefaults.standard.set(sidebarVisible, forKey: Prefs.outlineVisible) }
     }
+    @Published var sidebarPane =
+        SidebarPane(rawValue: UserDefaults.standard.string(forKey: Prefs.sidebarPane) ?? "") ?? .outline
+    {
+        didSet { UserDefaults.standard.set(sidebarPane.rawValue, forKey: Prefs.sidebarPane) }
+    }
+    /// Markdown files in the current document's folder, for the Files sidebar and Quick Open.
+    @Published private(set) var folderFiles: [URL] = []
+    @Published var quickOpenVisible = false
+    @Published private(set) var canGoBack = false
+    @Published private(set) var canGoForward = false
     @Published var availableUpdate: UpdateChecker.Release?
     @Published private(set) var closedTabs: [URL] = []
     /// Bumped whenever the page is re-rendered, so the find bar can search the new content.
@@ -34,13 +49,30 @@ final class AppState: ObservableObject {
 
     let reader = ReaderController()
 
+    private struct Position {
+        let url: URL
+        let y: Double
+    }
+    private var backStack: [Position] = []
+    private var forwardStack: [Position] = []
+    private var folderWatcher: FileWatcher?
+    private var watchedFolder: URL?
+    /// Last scroll position per file path, kept across launches: path → [y, time saved].
+    private var scrollMemory =
+        UserDefaults.standard.dictionary(forKey: Prefs.scrollMemory) as? [String: [Double]] ?? [:]
+
     var selected: DocTab? { tabs.first { $0.id == selectedID } }
     var selectedIndex: Int? { tabs.firstIndex { $0.id == selectedID } }
 
     private init() {
         recents = (UserDefaults.standard.stringArray(forKey: Prefs.recentFiles) ?? [])
             .map { URL(fileURLWithPath: $0) }
-        reader.onOpenFile = { [weak self] url, anchor in self?.open([url], anchor: anchor) }
+        reader.onOpenFile = { [weak self] url, anchor, y in
+            self?.recordPosition(y: y)
+            self?.open([url], anchor: anchor)
+        }
+        reader.onNavigate = { [weak self] y in self?.recordPosition(y: y) }
+        reader.webView.onCopyHeadingLink = { [weak self] id in self?.copyLink(toHeading: id) }
         reader.onOutline = { [weak self] items in
             if self?.outline != items { self?.outline = items }
         }
@@ -54,7 +86,8 @@ final class AppState: ObservableObject {
     // MARK: Opening & closing
 
     /// Opens files as tabs (or focuses them if already open). `anchor` jumps to a heading id.
-    func open(_ urls: [URL], remember: Bool = true, anchor: String? = nil) {
+    /// `scroll` restores a position (Back/Forward); otherwise new tabs reopen where you left the file.
+    func open(_ urls: [URL], remember: Bool = true, anchor: String? = nil, scroll: Double? = nil) {
         var lastID: UUID?
         // New tabs go right after the current one, in the order they were given.
         var insertAt = selectedIndex.map { $0 + 1 } ?? tabs.count
@@ -69,10 +102,21 @@ final class AppState: ObservableObject {
                 lastID = existing.id
                 if let anchor, !anchor.isEmpty {
                     if existing.id == selectedID { reader.scrollToAnchor(anchor) } else { existing.pendingAnchor = anchor }
+                } else if let scroll {
+                    if existing.showSource {
+                        existing.showSource = false
+                        existing.pendingScroll = scroll
+                        if existing.id == selectedID { reader.display(existing) }
+                    } else if existing.id == selectedID {
+                        reader.scrollTo(scroll)
+                    } else {
+                        existing.pendingScroll = scroll
+                    }
                 }
             } else {
                 let tab = DocTab(url: url)
                 tab.pendingAnchor = anchor?.isEmpty == false ? anchor : nil
+                if tab.pendingAnchor == nil { tab.pendingScroll = scroll ?? scrollMemory[url.path]?.first }
                 tab.onChange = { [weak self, weak tab] in
                     guard let self, let tab else { return }
                     if tab.id == self.selectedID { self.reader.display(tab) }
@@ -104,6 +148,7 @@ final class AppState: ObservableObject {
     func close(_ id: UUID) {
         guard let index = tabs.firstIndex(where: { $0.id == id }) else { return }
         let tab = tabs.remove(at: index)
+        rememberScroll(of: tab)
         reader.forget(tab)
         closedTabs.removeAll { $0 == tab.url }
         closedTabs.append(tab.url)
@@ -180,13 +225,102 @@ final class AppState: ObservableObject {
         selected?.reload()
     }
 
-    func toggleOutline() {
-        outlineVisible.toggle()
+    func toggleSidebar() {
+        sidebarVisible.toggle()
+    }
+
+    /// Shows the sidebar on `pane`, or hides it if that pane is already showing.
+    func showSidebar(_ pane: SidebarPane) {
+        if sidebarVisible && sidebarPane == pane {
+            sidebarVisible = false
+        } else {
+            sidebarPane = pane
+            sidebarVisible = true
+        }
     }
 
     func scrollToHeading(_ id: String) {
         if selected?.showSource == true { toggleSource() }
+        recordPosition()
         reader.scrollToAnchor(id)
+    }
+
+    func copyLink(toHeading id: String) {
+        guard let tab = selected else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("\(tab.url.lastPathComponent)#\(id)", forType: .string)
+        show(Toast(message: "Link copied"))
+    }
+
+    // MARK: Back & Forward
+
+    /// Remembers where the reader is before following a link, so Back can return there.
+    private func recordPosition(y: Double? = nil) {
+        guard let tab = selected, !tab.showSource else { return }
+        backStack.append(Position(url: tab.url, y: y ?? reader.lastScroll(for: tab) ?? 0))
+        if backStack.count > 100 { backStack.removeFirst() }
+        forwardStack.removeAll()
+        updateHistoryState()
+    }
+
+    func goBack() {
+        guard let target = backStack.popLast() else { return }
+        if let here = currentPosition() { forwardStack.append(here) }
+        go(to: target)
+    }
+
+    func goForward() {
+        guard let target = forwardStack.popLast() else { return }
+        if let here = currentPosition() { backStack.append(here) }
+        go(to: target)
+    }
+
+    private func currentPosition() -> Position? {
+        guard let tab = selected else { return nil }
+        return Position(url: tab.url, y: reader.lastScroll(for: tab) ?? 0)
+    }
+
+    private func go(to position: Position) {
+        open([position.url], remember: false, scroll: position.y)
+        updateHistoryState()
+    }
+
+    private func updateHistoryState() {
+        canGoBack = !backStack.isEmpty
+        canGoForward = !forwardStack.isEmpty
+    }
+
+    // MARK: Folder & Quick Open
+
+    /// Lists the Markdown files next to the current document and keeps the list current.
+    private func refreshFolder() {
+        guard let folder = selected?.url.deletingLastPathComponent() else {
+            folderFiles = []
+            watchedFolder = nil
+            folderWatcher = nil
+            return
+        }
+        if folder != watchedFolder {
+            watchedFolder = folder
+            folderWatcher = FileWatcher(url: folder) { [weak self] in self?.listFolder() }
+        }
+        listFolder()
+    }
+
+    private func listFolder() {
+        guard let folder = watchedFolder else { return }
+        let items = (try? FileManager.default.contentsOfDirectory(
+            at: folder, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+        let files = items.filter(MarkdownFiles.isMarkdownDocument)
+            .map(\.standardizedFileURL)
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+        if files != folderFiles { folderFiles = files }
+    }
+
+    /// Open tabs first, then recent files, then the rest of the current folder.
+    var quickOpenCandidates: [URL] {
+        var seen = Set<String>()
+        return (tabs.map(\.url) + recents + folderFiles).filter { seen.insert($0.path).inserted }
     }
 
     func zoom(by delta: Double?) {
@@ -317,7 +451,7 @@ final class AppState: ObservableObject {
             alert.informativeText = error[NSAppleScript.errorMessage] as? String ?? ""
         } else {
             alert.messageText = "The mdr command is installed"
-            alert.informativeText = "Try: mdr README.md"
+            alert.informativeText = "Usage: mdr file.md"
         }
         alert.runModal()
     }
@@ -368,8 +502,25 @@ final class AppState: ObservableObject {
 
     private var restoring = false
 
+    /// Saves where each open file is scrolled to, so it reopens there next time.
+    func rememberScrollPositions() {
+        tabs.forEach(rememberScroll(of:))
+        let limit = 300
+        if scrollMemory.count > limit {
+            let oldest = scrollMemory.sorted { ($0.value.last ?? 0) < ($1.value.last ?? 0) }
+            oldest.prefix(scrollMemory.count - limit).forEach { scrollMemory[$0.key] = nil }
+        }
+        UserDefaults.standard.set(scrollMemory, forKey: Prefs.scrollMemory)
+    }
+
+    private func rememberScroll(of tab: DocTab) {
+        guard let y = reader.lastScroll(for: tab) else { return }
+        scrollMemory[tab.url.path] = [y, Date().timeIntervalSince1970]
+    }
+
     func persistTabs() {
         guard !restoring else { return }
+        rememberScrollPositions()
         UserDefaults.standard.set(
             ["files": tabs.map(\.url.path), "selected": selected?.url.path ?? ""] as [String: Any],
             forKey: Prefs.openTabs)

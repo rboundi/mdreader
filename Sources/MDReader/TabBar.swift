@@ -38,6 +38,7 @@ struct TabBar: View {
 
 private struct TabItem: View {
     @EnvironmentObject private var state: AppState
+    @AppStorage(Prefs.appearance) private var appearance = AppearanceMode.system.rawValue
     let tab: DocTab
     let detail: String?
     let isSelected: Bool

@@ -1,19 +1,20 @@
 import AppKit
 
 enum AppearanceMode: String, CaseIterable, Identifiable {
-    case system, light, dark
+    case system, light, sepia, dark
     var id: String { rawValue }
     var label: String {
         switch self {
         case .system: return "System"
         case .light: return "Light"
+        case .sepia: return "Sepia"
         case .dark: return "Dark"
         }
     }
     var nsAppearance: NSAppearance? {
         switch self {
         case .system: return nil
-        case .light: return NSAppearance(named: .aqua)
+        case .light, .sepia: return NSAppearance(named: .aqua)
         case .dark: return NSAppearance(named: .darkAqua)
         }
     }
@@ -57,6 +58,8 @@ enum Prefs {
     static let lastUpdateCheck = "lastUpdateCheck"
     static let latestVersion = "latestVersion"
     static let latestVersionURL = "latestVersionURL"
+    static let sidebarPane = "sidebarPane"
+    static let scrollMemory = "scrollMemory"
 
     static var defaultPDFFolder: String {
         FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first?.path
@@ -116,7 +119,10 @@ enum Prefs {
 /// Colors shared between the native chrome and the rendered page (keep in sync with style.css).
 enum Palette {
     static let page = NSColor(name: nil) { appearance in
-        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        if Prefs.appearanceMode == .sepia {
+            return NSColor(srgbRed: 0xF7 / 255, green: 0xF0 / 255, blue: 0xE3 / 255, alpha: 1)
+        }
+        return appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             ? NSColor(srgbRed: 0x1c / 255, green: 0x1c / 255, blue: 0x1e / 255, alpha: 1)
             : NSColor.white
     }

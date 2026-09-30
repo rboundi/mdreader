@@ -49,20 +49,14 @@ struct SettingsView: View {
             Section("Tabs") {
                 Toggle("Reopen tabs from last session", isOn: $restoreTabs)
             }
-            Section {
-                Toggle("Check GitHub for new versions", isOn: $checkForUpdates)
+            Section("Other") {
+                Toggle("Check for updates", isOn: $checkForUpdates)
                 HStack {
                     Text("Command line tool")
                     Spacer()
                     Text("mdr file.md").font(.system(.body, design: .monospaced)).foregroundStyle(.secondary)
                     Button("Install…") { AppState.shared.installCommandLineTool() }
                 }
-            } header: {
-                Text("Other")
-            } footer: {
-                Text("Checks api.github.com once a week. Nothing is downloaded or installed.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

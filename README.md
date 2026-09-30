@@ -4,7 +4,7 @@
 
 <h1 align="center">MDReader</h1>
 
-<p align="center">A Markdown reader for macOS.</p>
+<p align="center">A Markdown reader for the Mac. Tables, code, math and diagrams rendered cleanly, with tabs, an outline and PDF export. Free and open source.</p>
 
 <p align="center">
   <img src="docs/screenshot-dark.png" width="760" alt="MDReader showing a document with an outline sidebar, math and a diagram in dark mode">
@@ -18,16 +18,21 @@
 - Math with `$inline$`, `$$display$$` or ```` ```math ```` blocks (KaTeX)
 - Diagrams from ```` ```mermaid ```` blocks: flowchart, sequence, class, state, ER, Gantt, pie and more
 - Rendered or Markdown source view (<kbd>⌘</kbd><kbd>/</kbd>)
-- Outline sidebar (<kbd>⇧</kbd><kbd>⌘</kbd><kbd>O</kbd>)
+- Sidebar with the document outline or the other Markdown files in the folder
+- Collapsible sections, image zoom and a reading progress bar
+- Back and Forward after following links
+- Reopens each file where you left off
 - Word count and reading time
 - Live reload when the file changes on disk
 - Find in page
 
 **Tabs**
 - Drag to reorder, right-click to close others or reveal in Finder
+- Quick Open (<kbd>⌘</kbd><kbd>P</kbd>) for open tabs, recent files and files in the same folder
 - Reopen closed tabs with <kbd>⇧</kbd><kbd>⌘</kbd><kbd>T</kbd>
 - Tabs are restored on relaunch
 - Links to other Markdown files open in a new tab, including `guide.md#setup`
+- Right-click a heading to copy a link to it
 
 **Export**
 - PDF (<kbd>⌘</kbd><kbd>E</kbd>), saved to the Desktop by default, with page numbers and clickable links
@@ -35,7 +40,7 @@
 - Copy as Rich Text (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>C</kbd>) for Mail, Notes, Pages or Google Docs
 
 **Appearance**
-- Light, Dark or System theme
+- Light, Sepia, Dark or System theme
 - Sans or serif font, text size and text width
 
 **Other**
@@ -76,14 +81,16 @@ Select a `.md` file in Finder, press <kbd>⌘</kbd><kbd>I</kbd>, choose MDReader
 | Action | Shortcut |
 |---|---|
 | Open | <kbd>⌘</kbd><kbd>O</kbd> |
+| Quick Open | <kbd>⌘</kbd><kbd>P</kbd> |
+| Back / Forward | <kbd>⌘</kbd><kbd>[</kbd> / <kbd>⌘</kbd><kbd>]</kbd> |
 | Close tab / reopen closed tab | <kbd>⌘</kbd><kbd>W</kbd> / <kbd>⇧</kbd><kbd>⌘</kbd><kbd>T</kbd> |
 | Next / previous tab | <kbd>⌃</kbd><kbd>Tab</kbd> / <kbd>⌃</kbd><kbd>⇧</kbd><kbd>Tab</kbd> |
 | Go to tab 1–8 / last tab | <kbd>⌘</kbd><kbd>1</kbd>…<kbd>⌘</kbd><kbd>8</kbd> / <kbd>⌘</kbd><kbd>9</kbd> |
 | Toggle Markdown source | <kbd>⌘</kbd><kbd>/</kbd> |
-| Show / hide outline | <kbd>⇧</kbd><kbd>⌘</kbd><kbd>O</kbd> |
+| Outline / Files sidebar | <kbd>⇧</kbd><kbd>⌘</kbd><kbd>O</kbd> / <kbd>⇧</kbd><kbd>⌘</kbd><kbd>E</kbd> |
 | Export as PDF / HTML | <kbd>⌘</kbd><kbd>E</kbd> / <kbd>⌥</kbd><kbd>⌘</kbd><kbd>E</kbd> |
 | Copy as Rich Text | <kbd>⌥</kbd><kbd>⌘</kbd><kbd>C</kbd> |
-| Print | <kbd>⌘</kbd><kbd>P</kbd> |
+| Print | <kbd>⇧</kbd><kbd>⌘</kbd><kbd>P</kbd> |
 | Find / next / previous | <kbd>⌘</kbd><kbd>F</kbd> / <kbd>⌘</kbd><kbd>G</kbd> / <kbd>⇧</kbd><kbd>⌘</kbd><kbd>G</kbd> |
 | Reload from disk | <kbd>⌘</kbd><kbd>R</kbd> |
 | Zoom in / out / actual size | <kbd>⌘</kbd><kbd>+</kbd> / <kbd>⌘</kbd><kbd>-</kbd> / <kbd>⌘</kbd><kbd>0</kbd> |
@@ -104,7 +111,9 @@ Sources/MDReader/
   ReaderController.swift  The shared WKWebView: rendering, printing, links
   ContentView.swift       Window layout, toolbar, find bar
   TabBar.swift            Tab strip
-  OutlineView.swift       Outline sidebar
+  SidebarView.swift       Sidebar and Files list
+  OutlineView.swift       Outline
+  QuickOpenView.swift     Quick Open
   HTMLExport.swift        HTML export and rich-text copy
   UpdateChecker.swift     Release check
   SettingsView.swift      Settings window

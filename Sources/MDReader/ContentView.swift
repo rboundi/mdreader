@@ -3,6 +3,8 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject private var state: AppState
+    // Redraw page-coloured chrome when switching between Light and Sepia (same system appearance).
+    @AppStorage(Prefs.appearance) private var appearance = AppearanceMode.system.rawValue
 
     var body: some View {
         VStack(spacing: 0) {
@@ -11,14 +13,23 @@ struct ContentView: View {
                 Divider()
             }
             HStack(spacing: 0) {
-                if state.outlineVisible && !state.tabs.isEmpty {
-                    OutlineView()
+                if state.sidebarVisible && !state.tabs.isEmpty {
+                    SidebarView()
                         .transition(.move(edge: .leading))
                     Divider()
                 }
                 reader
             }
-            .animation(.easeOut(duration: 0.18), value: state.outlineVisible)
+            .animation(.easeOut(duration: 0.18), value: state.sidebarVisible)
+        }
+        .overlay(alignment: .top) {
+            if state.quickOpenVisible {
+                ZStack(alignment: .top) {
+                    Color.black.opacity(0.001)
+                        .onTapGesture { state.quickOpenVisible = false }
+                    QuickOpenView().padding(.top, 50)
+                }
+            }
         }
         .onDrop(of: [.fileURL], isTargeted: nil) { providers in
             for provider in providers {
@@ -62,11 +73,11 @@ struct ContentView: View {
     private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
             Button {
-                state.toggleOutline()
+                state.toggleSidebar()
             } label: {
-                Label("Outline", systemImage: "sidebar.left")
+                Label("Sidebar", systemImage: "sidebar.left")
             }
-            .help("Outline (⇧⌘O)")
+            .help("Sidebar")
             .disabled(state.selected == nil)
         }
         ToolbarItemGroup(placement: .primaryAction) {
@@ -82,7 +93,7 @@ struct ContentView: View {
                         .foregroundStyle(Color.accentColor)
                 }
                 .buttonStyle(.plain)
-                .help("MDReader \(update.version) is out. Click to open the release page.")
+                .help("MDReader \(update.version) is available")
             }
 
             Button {

@@ -47,6 +47,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        MainActor.assumeIsolated { AppState.shared.rememberScrollPositions() }
+    }
 }
 
 struct AppCommands: Commands {
@@ -90,8 +94,20 @@ struct AppCommands: Commands {
 
         CommandGroup(replacing: .printItem) {
             Button("Print…") { state.printDocument() }
-                .keyboardShortcut("p")
+                .keyboardShortcut("p", modifiers: [.command, .shift])
                 .disabled(state.selected == nil)
+        }
+
+        CommandMenu("Go") {
+            Button("Back") { state.goBack() }
+                .keyboardShortcut("[")
+                .disabled(!state.canGoBack)
+            Button("Forward") { state.goForward() }
+                .keyboardShortcut("]")
+                .disabled(!state.canGoForward)
+            Divider()
+            Button("Quick Open…") { state.quickOpenVisible.toggle() }
+                .keyboardShortcut("p")
         }
 
         CommandGroup(after: .pasteboard) {
@@ -113,8 +129,14 @@ struct AppCommands: Commands {
         }
 
         CommandGroup(before: .toolbar) {
-            Button(state.outlineVisible ? "Hide Outline" : "Show Outline") { state.toggleOutline() }
-                .keyboardShortcut("o", modifiers: [.command, .shift])
+            Button(state.sidebarVisible && state.sidebarPane == .outline ? "Hide Outline" : "Show Outline") {
+                state.showSidebar(.outline)
+            }
+            .keyboardShortcut("o", modifiers: [.command, .shift])
+            Button(state.sidebarVisible && state.sidebarPane == .files ? "Hide Files" : "Show Files") {
+                state.showSidebar(.files)
+            }
+            .keyboardShortcut("e", modifiers: [.command, .shift])
             Button(state.selected?.showSource == true ? "Show Rendered" : "Show Markdown Source") {
                 state.toggleSource()
             }

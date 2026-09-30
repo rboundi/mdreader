@@ -190,8 +190,55 @@ test("HTML export strips reader UI and makes links absolute", async () => {
   const { window, render } = setup();
   render("# T\n\n[doc](other.md) ![img](pic.png)\n\n```\ncode\n```");
   const out = await window.mdr.exportHTML();
-  assert.doesNotMatch(out.html, /copy-btn|class="anchor"/);
+  assert.doesNotMatch(out.html, /copy-btn|class="fold"/);
   assert.match(out.html, /href="file:\/\/\/tmp\/docs\/other\.md"/);
   same(out.images, ["file:///tmp/docs/pic.png"]);
   assert.doesNotMatch(out.text, /Copy/);
 });
+
+test("collapses a section down to the next heading of the same level", () => {
+  const { window, render } = setup();
+  const c = render("## A\n\none\n\n### A.1\n\ntwo\n\n## B\n\nthree");
+  const [a, a1, b] = c.querySelectorAll("h2, h3");
+  a.querySelector(".fold").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  const hidden = [...c.children].filter((el) => el.classList.contains("folded-away")).map((el) => el.textContent);
+  same(hidden, ["one", "A.1", "two"]);
+  assert.ok(!b.classList.contains("folded-away"));
+  assert.ok(a.classList.contains("collapsed"));
+});
+
+test("jumping to a heading inside a collapsed section expands it", () => {
+  const { window, render } = setup();
+  const c = render("## A\n\none\n\n### Deep\n\ntwo");
+  c.querySelector("h2 .fold").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  assert.ok(c.querySelector("h3").classList.contains("folded-away"));
+  window.mdr.scrollToAnchor("deep");
+  assert.equal(c.querySelectorAll(".folded-away").length, 0);
+});
+
+test("reports the scroll position when following links, for Back and Forward", () => {
+  const { window, render, messages } = setup();
+  const c = render("[jump](#b) [other](other.md#x)\n\n## B");
+  for (const a of c.querySelectorAll("a")) a.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+  const nav = messages.filter((m) => m.type === "anchor" || m.type === "link");
+  same(nav.map((m) => m.type), ["anchor", "link"]);
+  assert.equal(typeof nav[0].y, "number");
+  assert.equal(nav[1].href, "file:///tmp/docs/other.md#x");
+});
+
+test("clicking an image opens it full size; Escape closes it", () => {
+  const { window, render } = setup();
+  const c = render("![pic](pic.png)");
+  c.querySelector("img").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  assert.ok(window.document.querySelector(".lightbox img"));
+  window.document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape" }));
+  assert.equal(window.document.querySelector(".lightbox"), null);
+});
+
+test("right-clicking a heading tells the app which one", () => {
+  const { window, render, messages } = setup();
+  const c = render("## Setup steps\n\ntext");
+  c.querySelector("h2").dispatchEvent(new window.MouseEvent("contextmenu", { bubbles: true }));
+  assert.equal(messages.findLast((m) => m.type === "context").heading, "setup-steps");
+});
+
