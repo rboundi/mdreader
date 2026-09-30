@@ -10,6 +10,12 @@ struct SettingsView: View {
     @AppStorage(Prefs.contentWidth) private var contentWidth = ContentWidth.medium.rawValue
     @AppStorage(Prefs.printHeaderFooter) private var printHeaderFooter = true
     @AppStorage(Prefs.checkForUpdates) private var checkForUpdates = true
+    @AppStorage(Prefs.editorApp) private var editorPath = ""
+
+    private var editorName: String? {
+        editorPath.isEmpty ? nil
+            : FileManager.default.displayName(atPath: editorPath).replacingOccurrences(of: ".app", with: "")
+    }
 
     var body: some View {
         Form {
@@ -50,6 +56,15 @@ struct SettingsView: View {
                 Toggle("Reopen tabs from last session", isOn: $restoreTabs)
             }
             Section("Other") {
+                HStack {
+                    Text("Edit with")
+                    Spacer()
+                    Text(editorName ?? "Not set").foregroundStyle(.secondary)
+                    Button("Choose…") {
+                        AppState.shared.chooseEditor()
+                        editorPath = UserDefaults.standard.string(forKey: Prefs.editorApp) ?? ""
+                    }
+                }
                 Toggle("Check for updates", isOn: $checkForUpdates)
                 HStack {
                     Text("Command line tool")

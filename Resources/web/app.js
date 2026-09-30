@@ -342,8 +342,11 @@
 
   async function render(p) {
     const token = ++renderToken;
+    // Switching between rendered and source view of the same document keeps the reader's place.
+    const docKey = p.base + "|" + p.title;
+    const sync = p.sync && current.doc === docKey && current.source !== !!p.source ? readPlace() : null;
     clearFind();
-    document.querySelector(".lightbox")?.remove();
+    closeLightbox();
     // Re-rendering the same document (file changed on disk) keeps collapsed sections collapsed.
     const keepFolds = p.scroll < 0 && !p.source
       ? [...content.querySelectorAll(".collapsed")].map((h) => h.id) : [];
@@ -381,10 +384,12 @@
         applyFolds();
       }
     }
+    current = { doc: docKey, source: !!p.source, md: p.md || "" };
     sendOutline();
     updateProgress();
     const reposition = () => {
-      if (!(p.anchor && scrollToAnchor(p.anchor))) restoreScroll(p.scroll);
+      if (sync) applyPlace(sync);
+      else if (!(p.anchor && scrollToAnchor(p.anchor))) restoreScroll(p.scroll);
     };
     reposition();
 
@@ -627,13 +632,170 @@
     big.src = img.currentSrc || img.src;
     big.alt = img.alt;
     box.append(big);
-    box.addEventListener("click", () => box.remove());
+    box.addEventListener("click", closeLightbox);
     document.body.append(box);
+    post({ type: "lightbox", open: true });
+  }
+
+  function closeLightbox() {
+    const box = document.querySelector(".lightbox");
+    if (!box) return;
+    box.remove();
+    post({ type: "lightbox", open: false });
   }
 
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") document.querySelector(".lightbox")?.remove();
+    if (e.key === "Escape") closeLightbox();
   });
+
+  // ---------- keeping your place between rendered and source view ----------
+
+  let current = { doc: null, source: false, md: "" };
+
+  const topHeadings = () => [...content.children].filter((el) => headingLevel(el));
+
+  // Character offset in the Markdown of every top-level heading, in document order.
+  function headingOffsets(md) {
+    const [, body] = splitFrontMatter(md);
+    let pos = md.length - body.length;
+    const offsets = [];
+    for (const token of marked.lexer(body)) {
+      if (token.type === "heading") offsets.push(pos);
+      pos += token.raw.length;
+    }
+    return offsets;
+  }
+
+  const maxScroll = () => Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+
+  // Where the reader is: the index of the last heading above the top of the window, and the
+  // scroll ratio as a fallback.
+  function readPlace() {
+    const place = { index: -1, ratio: window.scrollY / maxScroll() };
+    if (current.source) {
+      const offset = sourceOffsetAtTop();
+      if (offset !== null) {
+        headingOffsets(current.md).forEach((o, i) => { if (o <= offset) place.index = i; });
+      }
+    } else {
+      topHeadings().forEach((h, i) => {
+        if (!h.classList.contains("folded-away") && h.getBoundingClientRect().top <= 12) place.index = i;
+      });
+    }
+    return place;
+  }
+
+  function applyPlace(place) {
+    if (place.index >= 0) {
+      if (current.source) {
+        const offset = headingOffsets(current.md)[place.index];
+        const y = offset === undefined ? null : sourceOffsetY(offset);
+        if (y !== null) return window.scrollTo(0, Math.max(0, y - 12));
+      } else {
+        const hs = topHeadings();
+        // Heading counts differ when raw HTML adds headings; fall back to the ratio then.
+        if (hs.length === headingOffsets(current.md).length && hs[place.index]) {
+          reveal(hs[place.index]);
+          return hs[place.index].scrollIntoView?.({ block: "start" });
+        }
+      }
+    }
+    window.scrollTo(0, place.ratio * maxScroll());
+  }
+
+  function sourceTextNodes() {
+    const code = content.querySelector("pre code");
+    if (!code) return [];
+    const walker = document.createTreeWalker(code, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    return nodes;
+  }
+
+  function sourceOffsetAtTop() {
+    const pre = content.querySelector("pre");
+    if (!pre || !document.caretRangeFromPoint) return null;
+    const rect = pre.getBoundingClientRect();
+    const range = document.caretRangeFromPoint(rect.left + 8, Math.max(rect.top, 0) + 8);
+    if (!range) return null;
+    let offset = 0;
+    for (const node of sourceTextNodes()) {
+      if (node === range.startContainer) return offset + range.startOffset;
+      offset += node.nodeValue.length;
+    }
+    return null;
+  }
+
+  function sourceOffsetY(target) {
+    let offset = 0;
+    for (const node of sourceTextNodes()) {
+      const len = node.nodeValue.length;
+      if (offset + len > target) {
+        const range = document.createRange();
+        range.setStart(node, target - offset);
+        range.collapse(true);
+        const rect = range.getClientRects()[0] || range.getBoundingClientRect();
+        return rect ? rect.top + window.scrollY : null;
+      }
+      offset += len;
+    }
+    return null;
+  }
+
+  // ---------- footnote previews ----------
+
+  let footnoteTip = null;
+
+  function showFootnote(ref) {
+    hideFootnote();
+    const id = decodeURIComponent((ref.getAttribute("href") || "").slice(1));
+    const note = id && document.getElementById(id);
+    if (!note) return;
+    footnoteTip = document.createElement("div");
+    footnoteTip.className = "footnote-tip";
+    footnoteTip.innerHTML = note.innerHTML;
+    footnoteTip.querySelectorAll("[data-footnote-backref]").forEach((a) => a.remove());
+    document.body.append(footnoteTip);
+    const r = ref.getBoundingClientRect();
+    const width = Math.min(420, window.innerWidth - 32);
+    footnoteTip.style.width = width + "px";
+    footnoteTip.style.left = Math.max(16, Math.min(r.left - 20, window.innerWidth - width - 16)) + "px";
+    footnoteTip.style.top = r.bottom + window.scrollY + 8 + "px";
+  }
+
+  function hideFootnote() {
+    footnoteTip?.remove();
+    footnoteTip = null;
+  }
+
+  document.addEventListener("mouseover", (e) => {
+    const ref = e.target.closest?.("[data-footnote-ref]");
+    if (ref) showFootnote(ref);
+  });
+  document.addEventListener("mouseout", (e) => {
+    if (e.target.closest?.("[data-footnote-ref]")) hideFootnote();
+  });
+
+  // ---------- horizontal scrolling hint ----------
+
+  // A two-finger swipe means Back/Forward unless the pointer is over something that scrolls
+  // sideways (wide code, tables, math). The app asks the page which one it is.
+  let canScrollX = false;
+  let pointerQueued = false;
+  document.addEventListener("mousemove", (e) => {
+    if (pointerQueued) return;
+    pointerQueued = true;
+    requestAnimationFrame(() => {
+      pointerQueued = false;
+      const el = e.target.closest?.("pre, .table-wrap, .math-display, .mermaid-block");
+      const can = !!(el && el.scrollWidth > el.clientWidth + 1)
+        || document.documentElement.scrollWidth > document.documentElement.clientWidth + 1;
+      if (can !== canScrollX) {
+        canScrollX = can;
+        post({ type: "hscroll", can });
+      }
+    });
+  }, { passive: true });
 
   // ---------- events ----------
 
@@ -690,6 +852,7 @@
   let scrollTimer = null;
   window.addEventListener("scroll", () => {
     updateProgress();
+    hideFootnote();
     if (scrollTimer) return;
     scrollTimer = setTimeout(() => {
       scrollTimer = null;

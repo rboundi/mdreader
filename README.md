@@ -17,10 +17,13 @@
 - Syntax-highlighted code blocks with a copy button
 - Math with `$inline$`, `$$display$$` or ```` ```math ```` blocks (KaTeX)
 - Diagrams from ```` ```mermaid ```` blocks: flowchart, sequence, class, state, ER, Gantt, pie and more
-- Rendered or Markdown source view (<kbd>⌘</kbd><kbd>/</kbd>)
+- Rendered or Markdown source view (<kbd>⌘</kbd><kbd>/</kbd>), staying at the same section
+- Focus mode hides the tabs, toolbar and sidebar (<kbd>⇧</kbd><kbd>⌘</kbd><kbd>F</kbd>)
+- Footnotes show on hover
 - Sidebar with the document outline or the other Markdown files in the folder
 - Collapsible sections, image zoom and a reading progress bar
-- Back and Forward after following links
+- Back and Forward after following links, also with a two-finger swipe or the mouse side buttons
+- Jump to Heading (<kbd>⇧</kbd><kbd>⌘</kbd><kbd>J</kbd>)
 - Reopens each file where you left off
 - Word count and reading time
 - Live reload when the file changes on disk
@@ -44,7 +47,10 @@
 - Sans or serif font, text size and text width
 
 **Other**
-- `mdr` command: `mdr README.md` or `cat notes.md | mdr`
+- Edit in your editor of choice (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>O</kbd>); changes show as soon as you save
+- Share button for Mail, Messages and AirDrop
+- Open a folder to read its README with the other files in the sidebar
+- `mdr` command: `mdr README.md`, `mdr docs` or `cat notes.md | mdr`
 - Open files by drag and drop, Finder's Open With, or Open Recent
 - Weekly check for new versions on GitHub (can be turned off)
 
@@ -83,6 +89,9 @@ Select a `.md` file in Finder, press <kbd>⌘</kbd><kbd>I</kbd>, choose MDReader
 | Open | <kbd>⌘</kbd><kbd>O</kbd> |
 | Quick Open | <kbd>⌘</kbd><kbd>P</kbd> |
 | Back / Forward | <kbd>⌘</kbd><kbd>[</kbd> / <kbd>⌘</kbd><kbd>]</kbd> |
+| Jump to Heading | <kbd>⇧</kbd><kbd>⌘</kbd><kbd>J</kbd> |
+| Edit in editor | <kbd>⌥</kbd><kbd>⌘</kbd><kbd>O</kbd> |
+| Focus mode | <kbd>⇧</kbd><kbd>⌘</kbd><kbd>F</kbd> |
 | Close tab / reopen closed tab | <kbd>⌘</kbd><kbd>W</kbd> / <kbd>⇧</kbd><kbd>⌘</kbd><kbd>T</kbd> |
 | Next / previous tab | <kbd>⌃</kbd><kbd>Tab</kbd> / <kbd>⌃</kbd><kbd>⇧</kbd><kbd>Tab</kbd> |
 | Go to tab 1–8 / last tab | <kbd>⌘</kbd><kbd>1</kbd>…<kbd>⌘</kbd><kbd>8</kbd> / <kbd>⌘</kbd><kbd>9</kbd> |
@@ -113,7 +122,7 @@ Sources/MDReader/
   TabBar.swift            Tab strip
   SidebarView.swift       Sidebar and Files list
   OutlineView.swift       Outline
-  QuickOpenView.swift     Quick Open
+  PaletteView.swift       Quick Open and Jump to Heading
   HTMLExport.swift        HTML export and rich-text copy
   UpdateChecker.swift     Release check
   SettingsView.swift      Settings window

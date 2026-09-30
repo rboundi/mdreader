@@ -60,6 +60,7 @@ enum Prefs {
     static let latestVersionURL = "latestVersionURL"
     static let sidebarPane = "sidebarPane"
     static let scrollMemory = "scrollMemory"
+    static let editorApp = "editorApp"
 
     static var defaultPDFFolder: String {
         FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first?.path

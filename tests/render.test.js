@@ -269,3 +269,26 @@ test("switching documents closes a zoomed image", () => {
   assert.equal(window.document.querySelector(".lightbox"), null);
 });
 
+test("hovering a footnote reference shows the note", () => {
+  const { window, render } = setup();
+  const c = render("Claim.[^1]\n\n[^1]: The source.");
+  c.querySelector("[data-footnote-ref]").dispatchEvent(new window.MouseEvent("mouseover", { bubbles: true }));
+  const tip = window.document.querySelector(".footnote-tip");
+  assert.ok(tip);
+  assert.match(tip.textContent, /The source\./);
+  assert.equal(tip.querySelector("[data-footnote-backref]"), null);
+  c.querySelector("[data-footnote-ref]").dispatchEvent(new window.MouseEvent("mouseout", { bubbles: true }));
+  assert.equal(window.document.querySelector(".footnote-tip"), null);
+});
+
+test("switching to source keeps the reader at the same heading", () => {
+  const { window, render } = setup();
+  const md = "# Top\n\ntext\n\n## Middle\n\nmore\n\n## End\n\nlast";
+  const c = render(md);
+  // jsdom has no layout, so the scroll ratio is used; the call must not throw and must switch views.
+  render(md, { source: true, sync: true, scroll: -1 });
+  assert.equal(c.className, "source-view");
+  render(md, { source: false, sync: true, scroll: -1 });
+  assert.equal(c.className, "markdown-body");
+});
+

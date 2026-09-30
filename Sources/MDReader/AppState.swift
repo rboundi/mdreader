@@ -40,7 +40,8 @@ final class AppState: ObservableObject {
     }
     /// Markdown files in the current document's folder, for the Files sidebar and Quick Open.
     @Published private(set) var folderFiles: [URL] = []
-    @Published var quickOpenVisible = false
+    @Published var palette: PaletteMode?
+    @Published var focusMode = false
     @Published private(set) var canGoBack = false
     @Published private(set) var canGoForward = false
     @Published var availableUpdate: UpdateChecker.Release?
@@ -75,6 +76,10 @@ final class AppState: ObservableObject {
         }
         reader.onNavigate = { [weak self] y in self?.recordPosition(y: y) }
         reader.webView.onCopyHeadingLink = { [weak self] id in self?.copyLink(toHeading: id) }
+        reader.webView.onSwipe = { [weak self] direction in
+            if direction < 0 { self?.goBack() } else { self?.goForward() }
+        }
+        reader.webView.swipeDirections = { [weak self] in (self?.canGoBack ?? false, self?.canGoForward ?? false) }
         reader.onOutline = { [weak self] items in
             if self?.outline != items { self?.outline = items }
         }
@@ -95,8 +100,18 @@ final class AppState: ObservableObject {
         var insertAt = selectedIndex.map { $0 + 1 } ?? tabs.count
         var skipped: [String] = []
         var missing: [String] = []
+        var emptyFolders: [String] = []
         for raw in urls {
-            let url = raw.standardizedFileURL
+            var url = raw.standardizedFileURL
+            if url.hasDirectoryPath || (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+                guard let first = Self.mainDocument(in: url) else {
+                    emptyFolders.append(url.lastPathComponent)
+                    continue
+                }
+                url = first
+                sidebarPane = .files
+                sidebarVisible = true
+            }
             guard MarkdownFiles.canOpen(url) else {
                 if FileManager.default.fileExists(atPath: url.path) {
                     skipped.append(url.lastPathComponent)
@@ -141,13 +156,29 @@ final class AppState: ObservableObject {
             show(Toast(message: "Can't open \(skipped.joined(separator: ", ")): not a text file"))
         } else if !missing.isEmpty, !restoring {
             show(Toast(message: "\(missing.joined(separator: ", ")) not found"))
+        } else if !emptyFolders.isEmpty {
+            show(Toast(message: "No Markdown files in \(emptyFolders.joined(separator: ", "))"))
         }
+    }
+
+    /// README, then index, then the first Markdown file by name.
+    private static func mainDocument(in folder: URL) -> URL? {
+        let files = ((try? FileManager.default.contentsOfDirectory(
+            at: folder, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? [])
+            .filter(MarkdownFiles.isMarkdownDocument)
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+        for name in ["readme", "index"] {
+            if let match = files.first(where: { $0.deletingPathExtension().lastPathComponent.lowercased() == name }) {
+                return match
+            }
+        }
+        return files.first
     }
 
     func showOpenPanel() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false
+        panel.canChooseDirectories = true
         panel.allowedContentTypes = MarkdownFiles.extensions.compactMap { UTType(filenameExtension: $0) }
         panel.allowsOtherFileTypes = true
         if let dir = selected?.url.deletingLastPathComponent() { panel.directoryURL = dir }
@@ -226,12 +257,53 @@ final class AppState: ObservableObject {
     func toggleSource() {
         guard let tab = selected else { return }
         tab.showSource.toggle()
+        tab.syncOnNextDisplay = true
         objectWillChange.send()
         reader.display(tab)
     }
 
     func reloadSelected() {
         selected?.reload()
+    }
+
+    // MARK: Editing & focus
+
+    var editorURL: URL? {
+        UserDefaults.standard.string(forKey: Prefs.editorApp).map { URL(fileURLWithPath: $0) }
+            .flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+    }
+
+    var editorName: String? {
+        editorURL.map { FileManager.default.displayName(atPath: $0.path).replacingOccurrences(of: ".app", with: "") }
+    }
+
+    /// Opens the current file in the chosen editor; asks for one the first time.
+    func editInEditor() {
+        guard let tab = selected else { return }
+        guard let editor = editorURL ?? chooseEditor() else { return }
+        NSWorkspace.shared.open([tab.url], withApplicationAt: editor, configuration: NSWorkspace.OpenConfiguration()) {
+            _, error in
+            if let error {
+                DispatchQueue.main.async { AppState.shared.show(Toast(message: error.localizedDescription)) }
+            }
+        }
+    }
+
+    @discardableResult
+    func chooseEditor() -> URL? {
+        let panel = NSOpenPanel()
+        panel.message = "Choose the app to edit Markdown files with"
+        panel.prompt = "Choose"
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        guard panel.runModal() == .OK, let app = panel.url else { return nil }
+        UserDefaults.standard.set(app.path, forKey: Prefs.editorApp)
+        objectWillChange.send()
+        return app
+    }
+
+    func toggleFocusMode() {
+        focusMode.toggle()
     }
 
     func toggleSidebar() {

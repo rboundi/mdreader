@@ -1,24 +1,60 @@
 import SwiftUI
 
-/// ⌘P: type part of a file name to jump to an open tab, a recent file or a file in the current folder.
-struct QuickOpenView: View {
+enum PaletteMode {
+    /// ⌘P: open tabs, recent files and files in the current folder.
+    case files
+    /// ⇧⌘J: headings of the current document.
+    case headings
+}
+
+/// Type-to-filter list for Quick Open and Jump to Heading.
+struct PaletteView: View {
     @EnvironmentObject private var state: AppState
+    let mode: PaletteMode
     @State private var query = ""
     @State private var selection = 0
     @State private var keyMonitor: Any?
     @FocusState private var focused: Bool
 
-    private var results: [URL] {
+    private struct Entry: Hashable {
+        let id: String
+        let title: String
+        let detail: String
+        let indent: Int
+        let isOpen: Bool
+    }
+
+    private static let rowHeight: CGFloat = 30
+
+    private var entries: [Entry] {
+        switch mode {
+        case .files:
+            let open = Set(state.tabs.map(\.url.path))
+            return state.quickOpenCandidates.map { url in
+                Entry(
+                    id: url.path, title: url.lastPathComponent,
+                    detail: (url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath,
+                    indent: 0, isOpen: open.contains(url.path))
+            }
+        case .headings:
+            let top = state.outline.map(\.level).min() ?? 1
+            return state.outline.map {
+                Entry(id: $0.id, title: $0.text, detail: "", indent: $0.level - top, isOpen: false)
+            }
+        }
+    }
+
+    private var results: [Entry] {
         let q = query.trimmingCharacters(in: .whitespaces)
-        let candidates = state.quickOpenCandidates
-        guard !q.isEmpty else { return Array(candidates.prefix(50)) }
-        return candidates.enumerated()
-            .compactMap { index, url -> (URL, Int, Int)? in
-                let name = url.lastPathComponent
-                let folder = url.deletingLastPathComponent().lastPathComponent
-                guard let score = Self.score(name, q) ?? Self.score("\(folder)/\(name)", q).map({ $0 - 10 })
+        let all = entries
+        guard !q.isEmpty else { return Array(all.prefix(mode == .files ? 50 : 500)) }
+        return all.enumerated()
+            .compactMap { index, entry -> (Entry, Int, Int)? in
+                let folder = (entry.detail as NSString).lastPathComponent
+                guard let score = Self.score(entry.title, q)
+                    ?? (mode == .files ? Self.score("\(folder)/\(entry.title)", q).map { $0 - 10 } : nil)
                 else { return nil }
-                return (url, score, index)
+                return (entry, score, index)
             }
             .sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.2 < $1.2 }
             .prefix(50)
@@ -28,14 +64,14 @@ struct QuickOpenView: View {
     var body: some View {
         let items = results
         VStack(spacing: 0) {
-            TextField("Open file", text: $query)
+            TextField(mode == .files ? "Open file" : "Jump to heading", text: $query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 16))
                 .padding(12)
                 .focused($focused)
             Divider()
             if items.isEmpty {
-                Text("No matches")
+                Text(mode == .headings && state.outline.isEmpty ? "No headings" : "No matches")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity)
                     .padding(14)
@@ -43,9 +79,9 @@ struct QuickOpenView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(spacing: 0) {
-                            ForEach(Array(items.enumerated()), id: \.element) { index, url in
-                                row(url, selected: index == selection)
-                                    .onTapGesture { open(url) }
+                            ForEach(Array(items.enumerated()), id: \.element) { index, entry in
+                                row(entry, selected: index == selection)
+                                    .onTapGesture { activate(entry) }
                             }
                         }
                         .padding(6)
@@ -77,24 +113,24 @@ struct QuickOpenView: View {
         }
     }
 
-    private static let rowHeight: CGFloat = 30
-
-    private func row(_ url: URL, selected: Bool) -> some View {
-        let isOpen = state.tabs.contains { $0.url == url }
-        return HStack(spacing: 8) {
-            Image(systemName: isOpen ? "doc.text.fill" : "doc.text")
+    private func row(_ entry: Entry, selected: Bool) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: mode == .headings ? "number" : entry.isOpen ? "doc.text.fill" : "doc.text")
                 .foregroundStyle(selected ? .white : .secondary)
-            Text(url.lastPathComponent)
+            Text(entry.title)
                 .foregroundStyle(selected ? .white : .primary)
                 .lineLimit(1)
-            Text((url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath)
-                .font(.caption)
-                .foregroundStyle(selected ? .white.opacity(0.8) : .secondary)
-                .lineLimit(1)
-                .truncationMode(.head)
+            if !entry.detail.isEmpty {
+                Text(entry.detail)
+                    .font(.caption)
+                    .foregroundStyle(selected ? .white.opacity(0.8) : .secondary)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+            }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 10)
+        .padding(.leading, 10 + CGFloat(min(entry.indent, 4)) * 14)
+        .padding(.trailing, 10)
         .frame(height: Self.rowHeight)
         .background(RoundedRectangle(cornerRadius: 6).fill(selected ? Color.accentColor : .clear))
         .contentShape(Rectangle())
@@ -102,26 +138,28 @@ struct QuickOpenView: View {
 
     /// Arrow keys move the selection, Return opens, Escape closes.
     private func handleKey(_ event: NSEvent) -> Bool {
-        let count = results.count
+        let items = results
         switch event.keyCode {
         case 125:  // down
-            if count > 0 { selection = min(selection + 1, count - 1) }
+            if !items.isEmpty { selection = min(selection + 1, items.count - 1) }
         case 126:  // up
             selection = max(selection - 1, 0)
         case 36, 76:  // return, enter
-            let items = results
-            if items.indices.contains(selection) { open(items[selection]) }
+            if items.indices.contains(selection) { activate(items[selection]) }
         case 53:  // escape
-            state.quickOpenVisible = false
+            state.palette = nil
         default:
             return false
         }
         return true
     }
 
-    private func open(_ url: URL) {
-        state.quickOpenVisible = false
-        state.open([url])
+    private func activate(_ entry: Entry) {
+        state.palette = nil
+        switch mode {
+        case .files: state.open([URL(fileURLWithPath: entry.id)])
+        case .headings: state.scrollToHeading(entry.id)
+        }
     }
 
     /// Characters of `query` must appear in order in `text`; consecutive runs, word starts and a

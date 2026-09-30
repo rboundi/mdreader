@@ -32,6 +32,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated { AppState.shared.checkForUpdatesInBackground() }
+        // Mouse side buttons go Back and Forward.
+        NSEvent.addLocalMonitorForEvents(matching: .otherMouseDown) { event in
+            guard event.buttonNumber == 3 || event.buttonNumber == 4 else { return event }
+            MainActor.assumeIsolated {
+                if event.buttonNumber == 3 { AppState.shared.goBack() } else { AppState.shared.goForward() }
+            }
+            return nil
+        }
+        // Escape leaves focus mode, unless it's closing something else first.
+        NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            guard event.keyCode == 53 else { return event }
+            let handled = MainActor.assumeIsolated { () -> Bool in
+                let state = AppState.shared
+                guard state.focusMode, !state.findVisible, state.palette == nil,
+                    !state.reader.lightboxOpen, NSApp.keyWindow === state.reader.webView.window
+                else { return false }
+                state.focusMode = false
+                return true
+            }
+            return handled ? nil : event
+        }
         // The Zoom In item is ⌘+, which needs Shift on most layouts; accept ⌘= too, like browsers.
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
             guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
@@ -76,6 +97,10 @@ struct AppCommands: Commands {
                     .disabled(state.recents.isEmpty)
             }
             Divider()
+            Button(state.editorName.map { "Edit in \($0)" } ?? "Edit in…") { state.editInEditor() }
+                .keyboardShortcut("o", modifiers: [.command, .option])
+                .disabled(state.selected == nil)
+            Divider()
             Button("Reopen Closed Tab") { state.reopenClosedTab() }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
                 .disabled(state.closedTabs.isEmpty)
@@ -106,8 +131,11 @@ struct AppCommands: Commands {
                 .keyboardShortcut("]")
                 .disabled(!state.canGoForward)
             Divider()
-            Button("Quick Open…") { state.quickOpenVisible.toggle() }
+            Button("Quick Open…") { state.palette = state.palette == .files ? nil : .files }
                 .keyboardShortcut("p")
+            Button("Jump to Heading…") { state.palette = state.palette == .headings ? nil : .headings }
+                .keyboardShortcut("j", modifiers: [.command, .shift])
+                .disabled(state.selected == nil)
         }
 
         CommandGroup(after: .pasteboard) {
@@ -129,6 +157,9 @@ struct AppCommands: Commands {
         }
 
         CommandGroup(before: .toolbar) {
+            Button(state.focusMode ? "Exit Focus Mode" : "Enter Focus Mode") { state.toggleFocusMode() }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
+                .disabled(state.selected == nil && !state.focusMode)
             Button(state.sidebarVisible && state.sidebarPane == .outline ? "Hide Outline" : "Show Outline") {
                 state.showSidebar(.outline)
             }

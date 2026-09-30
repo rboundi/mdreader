@@ -8,12 +8,12 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !state.tabs.isEmpty {
+            if !state.tabs.isEmpty && !state.focusMode {
                 TabBar()
                 Divider()
             }
             HStack(spacing: 0) {
-                if state.sidebarVisible && !state.tabs.isEmpty {
+                if state.sidebarVisible && !state.tabs.isEmpty && !state.focusMode {
                     SidebarView()
                         .transition(.move(edge: .leading))
                     Divider()
@@ -23,11 +23,11 @@ struct ContentView: View {
             .animation(.easeOut(duration: 0.18), value: state.sidebarVisible)
         }
         .overlay(alignment: .top) {
-            if state.quickOpenVisible {
+            if let mode = state.palette {
                 ZStack(alignment: .top) {
                     Color.black.opacity(0.001)
-                        .onTapGesture { state.quickOpenVisible = false }
-                    QuickOpenView().padding(.top, 50)
+                        .onTapGesture { state.palette = nil }
+                    PaletteView(mode: mode).id(mode).padding(.top, 50)
                 }
             }
         }
@@ -42,6 +42,8 @@ struct ContentView: View {
         .navigationTitle(state.selected?.title ?? "MDReader")
         .navigationSubtitle(subtitle)
         .toolbar { toolbar }
+        .toolbar(state.focusMode ? .hidden : .visible, for: .windowToolbar)
+        .animation(.easeOut(duration: 0.18), value: state.focusMode)
     }
 
     private var reader: some View {
@@ -106,6 +108,21 @@ struct ContentView: View {
             .help(showingSource ? "Show rendered view (⌘/)" : "Show Markdown source (⌘/)")
             .disabled(state.selected == nil)
 
+            Button {
+                state.editInEditor()
+            } label: {
+                Label("Edit", systemImage: "pencil")
+            }
+            .help(state.editorName.map { "Edit in \($0)" } ?? "Edit in…")
+            .disabled(state.selected == nil)
+
+            if let url = state.selected?.url {
+                ShareLink(item: url) {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                }
+                .help("Share")
+            }
+
             Menu {
                 Button("Export as PDF…") { state.exportPDF() }
                 Button("Export as HTML…") { state.exportHTML() }
@@ -113,7 +130,7 @@ struct ContentView: View {
                 Divider()
                 Button("Print…") { state.printDocument() }
             } label: {
-                Label("Export", systemImage: "square.and.arrow.up")
+                Label("Export", systemImage: "arrow.down.doc")
             } primaryAction: {
                 state.exportPDF()
             }

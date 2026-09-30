@@ -1,6 +1,7 @@
 #!/bin/sh
 # mdr — open Markdown files in MDReader.
 #   mdr README.md docs/*.md     open files as tabs
+#   mdr docs                    open a folder (its README, with the Files sidebar)
 #   cat notes.md | mdr          read Markdown from a pipe
 #   mdr                         bring MDReader to the front
 BUNDLE_ID="com.movinapp.mdreader.macos"
@@ -20,8 +21,8 @@ if [ $# -eq 0 ]; then
 fi
 
 for f in "$@"; do
-  if [ ! -f "$f" ]; then
-    echo "mdr: $f: No such file" >&2
+  if [ ! -e "$f" ]; then
+    echo "mdr: $f: No such file or folder" >&2
     exit 1
   fi
 done

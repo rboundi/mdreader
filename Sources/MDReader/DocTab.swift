@@ -11,6 +11,8 @@ final class DocTab: Identifiable {
     var pendingAnchor: String?
     /// Scroll position to restore on the next render (Back/Forward, reopened files).
     var pendingScroll: Double?
+    /// Set when switching between rendered and source view, so the reader keeps their place.
+    var syncOnNextDisplay = false
     private(set) var wordCount = 0
     /// Called after the file's contents change on disk.
     var onChange: (() -> Void)?

@@ -11,6 +11,8 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
     var onOpenFile: ((URL, String?, Double?) -> Void)?
     /// An in-page link was followed from this scroll position.
     var onNavigate: ((Double) -> Void)?
+    /// A zoomed image is showing (Escape closes it rather than leaving focus mode).
+    private(set) var lightboxOpen = false
     var onOutline: (([OutlineItem]) -> Void)?
     var onActiveHeading: ((String?) -> Void)?
     var onDisplay: (() -> Void)?
@@ -74,7 +76,10 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
         defer { onDisplay?() }
         let anchor = tab.pendingAnchor ?? ""
         tab.pendingAnchor = nil
+        let sync = tab.syncOnNextDisplay
+        tab.syncOnNextDisplay = false
         send([
+            "sync": sync,
             "anchor": anchor,
             "md": tab.text,
             "source": tab.showSource,
@@ -326,6 +331,10 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
             }
         case "anchor":
             if let y = body["y"] as? NSNumber { onNavigate?(y.doubleValue) }
+        case "hscroll":
+            webView.canScrollHorizontally = (body["can"] as? Bool) ?? false
+        case "lightbox":
+            lightboxOpen = (body["open"] as? Bool) ?? false
         case "context":
             webView.contextHeading = body["heading"] as? String ?? ""
         case "copy":
@@ -444,6 +453,11 @@ enum MarkdownFiles {
 final class ReaderWebView: WKWebView {
     var onDropFiles: (([URL]) -> Void)?
     var onCopyHeadingLink: ((String) -> Void)?
+    /// Back (-1) or Forward (+1) from a trackpad swipe, and which of them is possible right now.
+    var onSwipe: ((Int) -> Void)?
+    var swipeDirections: (() -> (back: Bool, forward: Bool))?
+    /// Reported by the page: the pointer is over something that scrolls sideways.
+    var canScrollHorizontally = false
     /// Id of the heading under the last right-click, reported by the page just before the menu opens.
     var contextHeading = ""
 
@@ -472,6 +486,30 @@ final class ReaderWebView: WKWebView {
 
     @objc private func copyHeadingLink(_ sender: NSMenuItem) {
         if let id = sender.representedObject as? String { onCopyHeadingLink?(id) }
+    }
+
+    // Two-finger horizontal swipe = Back/Forward, as in Safari, unless the pointer is over wide
+    // content that scrolls sideways. Follows the "Swipe between pages" trackpad setting.
+    override func scrollWheel(with event: NSEvent) {
+        guard event.phase == .began, !canScrollHorizontally, NSEvent.isSwipeTrackingFromScrollEventsEnabled,
+            abs(event.scrollingDeltaX) > abs(event.scrollingDeltaY) * 1.5,
+            let directions = swipeDirections?(), directions.back || directions.forward
+        else { return super.scrollWheel(with: event) }
+        var handled = false
+        event.trackSwipeEvent(
+            options: [.lockDirection, .clampGestureAmount],
+            dampenAmountThresholdMin: directions.forward ? -1 : 0,
+            max: directions.back ? 1 : 0
+        ) { [weak self] amount, _, isComplete, _ in
+            guard isComplete, !handled, abs(amount) >= 1 else { return }
+            handled = true
+            self?.onSwipe?(amount > 0 ? -1 : 1)
+        }
+    }
+
+    // Three-finger swipes, when the trackpad is set up that way.
+    override func swipe(with event: NSEvent) {
+        if event.deltaX < 0 { onSwipe?(-1) } else if event.deltaX > 0 { onSwipe?(1) } else { super.swipe(with: event) }
     }
 
     private func fileURLs(_ info: NSDraggingInfo) -> [URL] {
