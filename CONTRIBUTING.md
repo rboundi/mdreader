@@ -1,10 +1,10 @@
 # Contributing
 
-Thanks for helping out! MDReader is intentionally small: it's a **reader**, not an editor, and every feature has to earn its weight. If you're planning something big, open an issue first so we can agree on the approach.
+MDReader is a reader, not an editor. For larger changes, open an issue first.
 
 ## Setup
 
-You need macOS 13+, the Xcode Command Line Tools (`xcode-select --install`), and Node.js only if you touch the renderer tests.
+Requires macOS 13+ and the Xcode Command Line Tools (`xcode-select --install`). The renderer tests need Node.js.
 
 ```bash
 ./build.sh                          # builds build/MDReader.app
@@ -21,11 +21,11 @@ cd tests && npm install && npm test # renderer tests
 
 ## Guidelines
 
-- Keep the app lightweight. Load anything heavy lazily, the way KaTeX and Mermaid only load when a document uses them.
+- Load large dependencies only when needed, as with KaTeX and Mermaid.
 - Add a test in `tests/render.test.js` for renderer changes.
-- Match the surrounding code style. Run `swift build` and make sure it has no warnings.
-- Everything the page gets from a document is untrusted. Keep `sanitize()` strict.
+- `swift build` should have no warnings.
+- Treat document content as untrusted. Keep `sanitize()` strict.
 
 ## Releasing
 
-Push a tag such as `git tag v1.1.0 && git push --tags`. The Release workflow then builds a universal app, attaches a .dmg and a .zip to a GitHub release, and updates the Homebrew cask if `HOMEBREW_TAP_TOKEN` is set.
+Push a tag such as `git tag v1.1.0 && git push --tags`. The Release workflow builds a universal app, attaches a .dmg and .zip to a GitHub release, and updates the Homebrew cask if `HOMEBREW_TAP_TOKEN` is set.

@@ -4,7 +4,7 @@ labels: [enhancement]
 body:
   - type: markdown
     attributes:
-      value: MDReader aims to stay a small, fast *reader*. Editing, syncing and plugin systems are out of scope.
+      value: Editing, syncing and plugins are out of scope.
   - type: textarea
     id: problem
     attributes:
