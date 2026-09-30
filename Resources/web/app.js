@@ -297,6 +297,14 @@
         h.id = id;
       }
       taken.add(h.id);
+      // "#" on hover copies a link to the heading. The button has no text, so textContent is unchanged.
+      if (!h.closest(".footnotes")) {
+        const link = document.createElement("button");
+        link.className = "anchor-link";
+        link.type = "button";
+        link.setAttribute("aria-label", "Copy link to heading");
+        h.append(link);
+      }
       // Only top-level headings can fold; ones inside HTML blocks, lists or quotes can't.
       if (h.parentNode !== root) return;
       const fold = document.createElement("button");
@@ -388,6 +396,8 @@
       btn.textContent = "Copy";
       pre.append(btn);
       if (lang) pre.dataset.lang = lang;
+      // One element per line, for optional line numbers.
+      code.innerHTML = splitLines(code.innerHTML).map((line) => `<span class="line">${line}</span>`).join("");
     });
 
     // Task lists
@@ -571,6 +581,7 @@
     closeLightbox();
     hideFootnote();
     hideLinkStatus();
+    leaveLink();
     // Re-rendering the same document (file changed on disk) keeps collapsed sections collapsed.
     // Re-rendering the same document keeps what's collapsed; otherwise use what the app remembered.
     const keepFolds = p.scroll < 0 && !p.source && current.doc === (p.path || p.base + "|" + p.title)
@@ -619,7 +630,7 @@
     sendOutline();
     updateProgress();
     checkLinks(token);
-    const edit = before && options.followEdits ? findEdit(before) : null;
+    const edit = before && options.followEdits && p.follow !== false ? findEdit(before) : null;
     let flash = true;
     const reposition = () => {
       if (sync) applyPlace(sync);
@@ -760,6 +771,7 @@
     tpl.innerHTML = marked.parse(body);
     sanitize(tpl.content);
     enhance(tpl.content);
+    if (options.smart) smarten(tpl.content);
     if (front) {
       const details = document.createElement("details");
       details.className = "front-matter";
@@ -860,6 +872,126 @@
     return nav;
   }
 
+  // ---------- smart punctuation ----------
+
+  const SKIP_SMART = "code, pre, kbd, samp, .math, .katex, svg, .front-matter";
+  const BLOCKS = "p, li, h1, h2, h3, h4, h5, h6, td, th, blockquote, dd, dt, figcaption, summary, div";
+
+  // Curly quotes, en and em dashes, and ellipses in text (not code or math).
+  function smarten(root) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: (n) => (n.parentElement?.closest(SKIP_SMART) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+    });
+    let before = "";
+    let block = null;
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const here = node.parentElement?.closest(BLOCKS);
+      if (here !== block) { before = ""; block = here; }
+      node.nodeValue = smartText(node.nodeValue, before);
+      before = node.nodeValue.slice(-1) || before;
+    }
+  }
+
+  function smartText(s, before) {
+    s = s.replace(/---/g, "—").replace(/--/g, "–").replace(/\.\.\./g, "…");
+    let out = "";
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      const opening = /^$|[\s([{\u2014\u2013-]/.test(i ? s[i - 1] : before);
+      if (c === '"') out += opening ? "“" : "”";
+      else if (c === "'") out += opening ? "‘" : "’";
+      else out += c;
+    }
+    return out;
+  }
+
+  // ---------- previews of linked notes ----------
+
+  let preview = null;
+  let previewLink = null;
+  let previewTimer = null;
+  let previewSeq = 0;
+
+  const isNoteLink = (a) => a.protocol === "file:" && !a.classList.contains("broken")
+    && /\.(md|markdown|mdown|mkdn?|mdwn)$/i.test(a.pathname);
+
+  function hoverLink(a) {
+    if (a === previewLink) return;
+    leaveLink();
+    if (!isNoteLink(a) || a.closest(".link-preview")) return;
+    previewLink = a;
+    previewTimer = setTimeout(() => post({ type: "preview", href: a.href, seq: ++previewSeq }), 500);
+  }
+
+  function leaveLink() {
+    clearTimeout(previewTimer);
+    previewLink = null;
+    preview?.remove();
+    preview = null;
+  }
+
+  // The start of the linked file, or the linked section, shown under the link.
+  function showPreview(seq, md) {
+    const a = previewLink;
+    if (seq !== previewSeq || !a?.isConnected) return;
+    let fragment = "";
+    try { fragment = decodeURIComponent(a.hash.slice(1)); } catch (_) {}
+    const tpl = document.createElement("template");
+    tpl.innerHTML = marked.parse(previewSection(md, fragment));
+    sanitize(tpl.content);
+    tpl.content.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
+    tpl.content.querySelectorAll("img[src]").forEach((img) => {
+      try { img.src = new URL(img.getAttribute("src"), a.href).href; } catch (_) {}
+    });
+    preview = document.createElement("div");
+    preview.className = "footnote-tip link-preview markdown-body";
+    preview.append(tpl.content);
+    document.body.append(preview);
+    const r = a.getBoundingClientRect();
+    const width = Math.min(460, window.innerWidth - 32);
+    preview.style.width = width + "px";
+    preview.style.left = Math.max(16, Math.min(r.left - 20, window.innerWidth - width - 16)) + "px";
+    preview.style.top = r.bottom + window.scrollY + 8 + "px";
+  }
+
+  function previewSection(md, fragment) {
+    const [, body] = splitFrontMatter(md);
+    const tokens = placeLexer.lexer(body);
+    let start = 0;
+    let end = tokens.length;
+    if (fragment) {
+      const used = new Map();
+      const scratch = document.createElement("template");
+      const found = tokens.findIndex((t) => {
+        if (t.type !== "heading") return false;
+        scratch.innerHTML = placeLexer.parseInline(t.text);
+        const text = scratch.content.textContent;
+        return slugify(text, used) === fragment || plainSlug(text) === fragment.toLowerCase();
+      });
+      if (found >= 0) {
+        start = found;
+        const next = tokens.findIndex((t, i) => i > found && t.type === "heading" && t.depth <= tokens[found].depth);
+        if (next >= 0) end = next;
+      }
+    }
+    let raw = "";
+    for (let i = start; i < end && raw.length < 2500; i++) raw += tokens[i].raw;
+    return raw;
+  }
+
+  // ---------- right-click: tables ----------
+
+  // A table as tab- or comma-separated text, for Numbers or Excel.
+  function tableText(index, csv) {
+    const table = content.querySelectorAll(".markdown-body table")[index];
+    if (!table) return null;
+    const cell = (c) => {
+      const t = c.textContent.trim().replace(/\s+/g, " ");
+      return csv && /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
+    };
+    return [...table.rows].map((row) => [...row.cells].map(cell).join(csv ? "," : "\t")).join("\n");
+  }
+
   // ---------- find in page ----------
 
   const found = { marks: [], index: -1 };
@@ -941,7 +1073,7 @@
     await preparePrint();  // light diagrams, like the PDF
     const clone = content.cloneNode(true);
     await afterPrint();
-    clone.querySelectorAll(".copy-btn, .fold, .front-matter").forEach((el) => el.remove());
+    clone.querySelectorAll(".copy-btn, .fold, .anchor-link, .front-matter").forEach((el) => el.remove());
     clone.querySelectorAll(".folded-away, .collapsed").forEach((el) => el.classList.remove("folded-away", "collapsed"));
     clone.querySelectorAll("mark.mdr-find").forEach((m) => m.replaceWith(m.textContent));
     clone.querySelectorAll(".broken, .just-edited").forEach((el) => el.classList.remove("broken", "just-edited"));
@@ -1411,12 +1543,18 @@
     const ref = e.target.closest?.("[data-footnote-ref]");
     if (ref) showFootnote(ref);
     const a = e.target.closest?.("a[href]");
-    if (a && content.contains(a)) showLinkStatus(a);
+    if (a && content.contains(a)) {
+      showLinkStatus(a);
+      hoverLink(a);
+    }
   });
   document.addEventListener("mouseout", (e) => {
     if (e.target.closest?.("[data-footnote-ref]")) hideFootnote();
     const a = e.target.closest?.("a[href]");
-    if (a && !a.contains(e.relatedTarget)) hideLinkStatus();
+    if (a && !a.contains(e.relatedTarget)) {
+      hideLinkStatus();
+      leaveLink();
+    }
   });
 
   // ---------- horizontal scrolling hint ----------
@@ -1451,13 +1589,25 @@
 
   // ---------- events ----------
 
-  const options = { numbers: false, followEdits: true };
+  const options = { numbers: false, followEdits: true, smart: false };
+  let lastPayload = null;
+  document.documentElement.lang = navigator.language || "en";  // for hyphenation
 
   function setOptions(o) {
     sourceStops = null;  // widths and fonts move the source lines
     if (o.font) document.body.dataset.font = o.font;
     if (o.wrap !== undefined) document.body.classList.toggle("wrap-code", !!o.wrap);
     if (o.lineNumbers !== undefined) document.body.classList.toggle("line-numbers", !!o.lineNumbers);
+    if (o.codeLineNumbers !== undefined) document.body.classList.toggle("code-line-numbers", !!o.codeLineNumbers);
+    if (o.justify !== undefined) document.body.classList.toggle("justify", !!o.justify);
+    if (o.lineHeight !== undefined) document.body.dataset.lineHeight = o.lineHeight;
+    if (o.smart !== undefined && !!o.smart !== options.smart) {
+      options.smart = !!o.smart;
+      // Draw the current document again with the new punctuation, in place.
+      if (lastPayload && !lastPayload.source && !lastPayload.clear) {
+        window.mdr.render({ ...lastPayload, scroll: -1, sync: false, anchor: "", offset: -1, follow: false });
+      }
+    }
     if (o.followEdits !== undefined) options.followEdits = !!o.followEdits;
     if (o.numbers !== undefined && !!o.numbers !== options.numbers) {
       options.numbers = !!o.numbers;
@@ -1500,6 +1650,11 @@
       toggleFold(fold.parentElement, e.altKey);
       return;
     }
+    const anchor = e.target.closest(".anchor-link");
+    if (anchor) {
+      post({ type: "copyLink", id: anchor.parentElement.id });
+      return;
+    }
     const th = e.target.closest(".markdown-body th.sortable");
     if (th && !e.target.closest("a")) {
       sortTable(th);
@@ -1529,7 +1684,30 @@
     const block = e.target.closest?.(".mermaid-block:not(.failed)");
     const diagram = block?.querySelector("svg")
       ? [...content.querySelectorAll(".mermaid-block:not(.failed)")].indexOf(block) : -1;
-    post({ type: "context", heading: h && !h.closest(".footnotes") ? h.id : "", diagram });
+    const table = e.target.closest?.(".markdown-body table");
+    const math = e.target.closest?.(".math[data-tex]");
+    const img = e.target.closest?.(".markdown-body img");
+    post({
+      type: "context", heading: h && !h.closest(".footnotes") ? h.id : "", diagram,
+      table: table ? [...content.querySelectorAll(".markdown-body table")].indexOf(table) : -1,
+      tex: math?.dataset.tex || "",
+      image: img?.src?.startsWith("file:") ? img.src : "",
+    });
+  });
+
+  // Words in the selection, for the title bar.
+  let selectionTimer = null;
+  let selectedWords = 0;
+  document.addEventListener("selectionchange", () => {
+    clearTimeout(selectionTimer);
+    selectionTimer = setTimeout(() => {
+      const text = String(window.getSelection() || "");
+      const words = (text.match(/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)*/gu) || []).length;
+      if (words !== selectedWords) {
+        selectedWords = words;
+        post({ type: "selection", words });
+      }
+    }, 150);
   });
 
   let scrollTimer = null;
@@ -1540,7 +1718,7 @@
     if (scrollTimer) return;
     scrollTimer = setTimeout(() => {
       scrollTimer = null;
-      post({ type: "scroll", y: window.scrollY });
+      post({ type: "scroll", y: window.scrollY, progress: Math.min(1, window.scrollY / maxScroll()) });
       updateActive();
     }, 120);
   }, { passive: true });
@@ -1563,8 +1741,12 @@
   });
 
   window.mdr = {
-    render: (p) => (lastRender = render(p).catch(() => {})),
-    setOptions, find, findStep, clearFind, exportHTML, preparePrint, afterPrint, markBroken,
+    render: (p) => {
+      lastPayload = p;
+      return (lastRender = render(p).catch(() => {}));
+    },
+    setOptions, find, findStep, clearFind, exportHTML, preparePrint, afterPrint, markBroken, showPreview, tableText,
+    showOffset: (offset) => applyOffset(offset),
     foldAll, diagramSVG, diagramRect, placeOffset, headingOffset,
     scrollToAnchor: (id) => scrollToAnchor(id, true),
     scrollTo: (y) => window.scrollTo(0, y),

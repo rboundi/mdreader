@@ -112,6 +112,9 @@ body {
 }
 
 body[data-font="serif"] .markdown-body { font-family: var(--font-serif); font-size: 17px; }
+body[data-line-height="compact"] { line-height: 1.45; }
+body[data-line-height="relaxed"] { line-height: 1.85; }
+body.justify .markdown-body :is(p, li, dd) { text-align: justify; -webkit-hyphens: auto; hyphens: auto; }
 body[data-font="serif"] .markdown-body :is(h1, h2, h3, h4, h5, h6) { font-family: var(--font-serif); }
 
 ::selection { background: var(--selection); }
@@ -173,6 +176,22 @@ body[data-font="serif"] .markdown-body :is(h1, h2, h3, h4, h5, h6) { font-family
   transform: rotate(45deg);
 }
 .markdown-body :is(h1, h2, h3, h4, h5, h6):hover .fold { opacity: 0.7; }
+
+/* "#" after a heading on hover: copies a link to it. */
+.markdown-body .anchor-link {
+  margin-left: 0.35em;
+  padding: 0 0.15em;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: 400 0.75em var(--font-sans);
+  vertical-align: middle;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.markdown-body .anchor-link::before { content: "#"; }
+.markdown-body :is(h1, h2, h3, h4, h5, h6):hover .anchor-link { opacity: 0.8; }
 .markdown-body .collapsed .fold { opacity: 0.7; transform: rotate(-90deg); }
 @media screen {
   .markdown-body .collapsed { color: var(--muted); }
@@ -262,6 +281,31 @@ code, pre { font-family: var(--font-mono); }
 }
 .markdown-body pre code { background: none; padding: 0; font-size: inherit; }
 body.wrap-code .markdown-body pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.markdown-body pre code .line { display: block; min-height: 1.5em; }
+body.code-line-numbers .markdown-body pre code { counter-reset: line; }
+body.code-line-numbers .markdown-body pre code .line { position: relative; padding-left: 2.8em; }
+body.code-line-numbers .markdown-body pre code .line::before {
+  counter-increment: line;
+  content: counter(line);
+  position: absolute;
+  left: 0;
+  width: 2em;
+  text-align: right;
+  color: var(--muted);
+  opacity: 0.55;
+}
+/* Language label; the copy button takes its place on hover. */
+.markdown-body pre[data-lang]::before {
+  content: attr(data-lang);
+  position: absolute;
+  top: 7px;
+  right: 12px;
+  font: 11px var(--font-sans);
+  color: var(--muted);
+  opacity: 0.8;
+  transition: opacity 0.15s;
+}
+.markdown-body pre[data-lang]:hover::before { opacity: 0; }
 
 .copy-btn {
   position: absolute;
@@ -408,6 +452,11 @@ body.line-numbers .source-view code .line::before {
 }
 
 .markdown-body img { cursor: zoom-in; }
+/* Bright images are toned down a little in dark mode, and shown as they are on hover. */
+@media screen and (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .markdown-body img { filter: brightness(0.85); transition: filter 0.2s; }
+  :root:not([data-theme]) .markdown-body img:hover { filter: none; }
+}
 .markdown-body a img { cursor: pointer; }
 .lightbox {
   position: fixed;
@@ -459,6 +508,16 @@ body.line-numbers .source-view code .line::before {
   pointer-events: none;
 }
 .footnote-tip > :first-child { margin-top: 0; }
+.link-preview { max-height: 320px; overflow: hidden; padding-bottom: 0; }
+.link-preview::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 36px;
+  background: linear-gradient(transparent, var(--bg));
+}
 .footnote-tip > :last-child { margin-bottom: 0; }
 
 /* ---------- find ---------- */
@@ -480,7 +539,9 @@ mark.mdr-find.current { background: var(--mark-current); color: #000; }
   html, body { background: #fff !important; }
   body { font-size: 11.5pt; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   #content { max-width: none; padding: 0; }
-  .copy-btn, .fold, .front-matter, #progress, .lightbox, .footnote-tip, #link-status { display: none !important; }
+  .copy-btn, .fold, .anchor-link, .front-matter, #progress, .lightbox, .footnote-tip, #link-status { display: none !important; }
+  .markdown-body pre[data-lang]::before { content: none; }
+  .markdown-body img { filter: none !important; }
   .markdown-body th[data-sort]::after { content: none; }
   mark.mdr-find, mark.mdr-find.current { background: none; color: inherit; }
   .markdown-body pre, .source-view pre { white-space: pre-wrap; word-wrap: break-word; overflow: visible; }

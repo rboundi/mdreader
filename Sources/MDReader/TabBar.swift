@@ -56,9 +56,15 @@ private struct TabItem: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: tab.showSource ? "chevron.left.forwardslash.chevron.right" : "doc.text")
+            Image(systemName: tab.showSource && !tab.editing ? "chevron.left.forwardslash.chevron.right" : "doc.text")
                 .font(.system(size: 11))
                 .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+                .overlay(alignment: .topTrailing) {
+                    // The file changed on disk while another tab was showing.
+                    if tab.changedInBackground {
+                        Circle().fill(Color.accentColor).frame(width: 6, height: 6).offset(x: 3, y: -2)
+                    }
+                }
             Text(tab.title)
                 .strikethrough(isMissing)
                 .lineLimit(1)
@@ -86,6 +92,7 @@ private struct TabItem: View {
         .contentShape(Rectangle())
         .onHover { hovering = $0 }
         .onTapGesture { state.selectedID = tab.id }
+        .overlay { MiddleClick { state.close(tab.id) } }
         .help(tab.url.path)
         .onDrag {
             // The file itself for Finder, Mail and other apps; the tab id for reordering here.
@@ -108,6 +115,10 @@ private struct TabItem: View {
             Button("Close Tabs to the Right") { state.closeToRight(tab.id) }
                 .disabled(state.tabs.last?.id == tab.id)
             Divider()
+            Button("Rename…") { state.rename(tab) }
+                .disabled(tab.isUntitled)
+            Button("Duplicate") { state.duplicate(tab) }
+                .disabled(tab.isUntitled)
             Button("Reveal in Finder") { state.revealInFinder(tab) }
             Button("Copy Path") { state.copyPath(tab) }
         }
@@ -117,6 +128,30 @@ private struct TabItem: View {
         if isSelected { return Color(nsColor: Palette.page) }
         return hovering ? Color.primary.opacity(0.05) : .clear
     }
+}
+
+/// Catches middle clicks (to close the tab) and lets every other click through.
+private struct MiddleClick: NSViewRepresentable {
+    let action: () -> Void
+
+    final class View: NSView {
+        var action: (() -> Void)?
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            let type = NSApp.currentEvent?.type
+            return type == .otherMouseDown || type == .otherMouseUp ? super.hitTest(point) : nil
+        }
+        override func otherMouseUp(with event: NSEvent) {
+            if event.buttonNumber == 2 { action?() } else { super.otherMouseUp(with: event) }
+        }
+    }
+
+    func makeNSView(context: Context) -> View {
+        let view = View()
+        view.action = action
+        return view
+    }
+
+    func updateNSView(_ view: View, context: Context) { view.action = action }
 }
 
 private struct CloseButton: View {

@@ -6,6 +6,7 @@ struct ContentView: View {
     // Redraw page-coloured chrome when switching between Light and Sepia (same system appearance).
     @AppStorage(Prefs.appearance) private var appearance = AppearanceMode.system.rawValue
     @AppStorage(Prefs.checkForUpdates) private var checkForUpdates = true
+    @AppStorage(Prefs.editPreview) private var editPreview = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -50,13 +51,41 @@ struct ContentView: View {
     }
 
     private var reader: some View {
-        ZStack(alignment: .top) {
-            Color(nsColor: Palette.page)
-            WebViewHost(webView: state.reader.webView)
-                .opacity(state.tabs.isEmpty ? 0 : 1)
-            if state.selected?.editing == true {
-                EditorHost(editor: state.editor)
+        GeometryReader { geo in
+            // While editing with the preview on: editor on the left, rendered page on the right.
+            let split = editing && editPreview
+            let half = (geo.size.width / 2).rounded()
+            ZStack(alignment: .topLeading) {
+                Color(nsColor: Palette.page)
+                WebViewHost(webView: state.reader.webView)
+                    .opacity(state.tabs.isEmpty ? 0 : 1)
+                    .frame(width: split ? geo.size.width - half : geo.size.width, height: geo.size.height)
+                    .offset(x: split ? half : 0)
+                if editing {
+                    EditorHost(editor: state.editor)
+                        .frame(width: split ? half : geo.size.width, height: geo.size.height)
+                    if split {
+                        Rectangle().fill(Color(nsColor: .separatorColor))
+                            .frame(width: 1, height: geo.size.height)
+                            .offset(x: half)
+                    }
+                }
+                overlays
             }
+        }
+        .overlay(alignment: .bottom) {
+            if let toast = state.toast {
+                ToastView(toast: toast).padding(.bottom, 18)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.easeOut(duration: 0.2), value: state.toast)
+    }
+
+    @ViewBuilder
+    private var overlays: some View {
+        ZStack(alignment: .top) {
+            Color.clear
             if state.tabs.isEmpty {
                 EmptyStateView()
             }
@@ -68,13 +97,6 @@ struct ContentView: View {
                 .padding(10)
             }
         }
-        .overlay(alignment: .bottom) {
-            if let toast = state.toast {
-                ToastView(toast: toast).padding(.bottom, 18)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .animation(.easeOut(duration: 0.2), value: state.toast)
     }
 
     @ToolbarContentBuilder
@@ -175,13 +197,20 @@ struct ContentView: View {
     private var subtitle: String {
         guard let tab = state.selected else { return "" }
         let folder = (tab.url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath
-        if tab.editing { return "\(folder) — Editing" + (tab.isDirty ? ", not saved" : "") }
+        let selection = state.selectionWords > 0
+            ? "\(state.selectionWords.formatted()) \(state.selectionWords == 1 ? "word" : "words") selected" : nil
+        if tab.editing {
+            return "\(folder) — Editing" + (tab.isDirty ? ", not saved" : "") + (selection.map { " · \($0)" } ?? "")
+        }
         if tab.showSource { return "\(folder) — Markdown" }
         guard tab.error == nil else { return folder }
         var parts = [folder]
-        if tab.wordCount > 0 {
+        if let selection {
+            parts.append(selection)
+        } else if tab.wordCount > 0 {
             let minutes = max(1, Int((Double(tab.wordCount) / 230).rounded()))
-            parts += ["\(tab.wordCount.formatted()) words", "\(minutes) min read"]
+            parts.append("\(tab.wordCount.formatted()) words")
+            parts.append(state.minutesLeft.map { "\($0) min left" } ?? "\(minutes) min read")
         }
         if tab.tasks.total > 0 { parts.append("\(tab.tasks.done) of \(tab.tasks.total) tasks done") }
         if let modified = tab.modified { parts.append(Self.modifiedText(modified)) }

@@ -48,8 +48,15 @@ final class DocTab: Identifiable {
     private var watcher: FileWatcher?
 
     var fileName: String { url.lastPathComponent }
-    /// The front matter title, or the file name.
-    var title: String { frontMatterTitle ?? fileName }
+    /// The front matter title, or the file name ("Untitled" for a new document).
+    var title: String { frontMatterTitle ?? (isUntitled ? url.deletingPathExtension().lastPathComponent : fileName) }
+
+    /// New documents live here until they're saved somewhere.
+    static let untitledFolder = MarkdownFiles.canonical(
+        FileManager.default.temporaryDirectory.appendingPathComponent("MDReader/Untitled", isDirectory: true))
+    var isUntitled: Bool { url.deletingLastPathComponent().path == Self.untitledFolder.path }
+    /// The file changed on disk while another tab was showing.
+    var changedInBackground = false
     /// Name for exported and printed copies.
     var documentName: String { frontMatterTitle ?? url.deletingPathExtension().lastPathComponent }
 

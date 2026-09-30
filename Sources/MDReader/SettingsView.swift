@@ -15,6 +15,13 @@ struct SettingsView: View {
     @AppStorage(Prefs.wrapCode) private var wrapCode = false
     @AppStorage(Prefs.followEdits) private var followEdits = true
     @AppStorage(Prefs.lineNumbers) private var lineNumbers = false
+    @AppStorage(Prefs.codeLineNumbers) private var codeLineNumbers = false
+    @AppStorage(Prefs.smartPunctuation) private var smartPunctuation = false
+    @AppStorage(Prefs.justify) private var justify = false
+    @AppStorage(Prefs.lineHeight) private var lineHeight = "normal"
+    @AppStorage(Prefs.paperSize) private var paperSize = PaperSize.system.rawValue
+    @AppStorage(Prefs.margins) private var margins = PageMargins.normal.rawValue
+    @AppStorage(Prefs.editPreview) private var editPreview = true
 
     private var editorName: String? {
         editorPath.isEmpty ? nil
@@ -42,8 +49,16 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                     Stepper("", value: $zoom, in: 0.5...3.0, step: 0.1).labelsHidden()
                 }
+                Picker("Line spacing", selection: $lineHeight) {
+                    Text("Compact").tag("compact")
+                    Text("Normal").tag("normal")
+                    Text("Relaxed").tag("relaxed")
+                }
+                Toggle("Justify text", isOn: $justify)
+                Toggle("Smart quotes and dashes", isOn: $smartPunctuation)
                 Toggle("Number headings", isOn: $numberHeadings)
                 Toggle("Wrap long lines in code blocks", isOn: $wrapCode)
+                Toggle("Line numbers in code blocks", isOn: $codeLineNumbers)
                 Toggle("Line numbers in Markdown source", isOn: $lineNumbers)
                 HStack {
                     Text("Custom CSS")
@@ -63,10 +78,18 @@ struct SettingsView: View {
                 }
                 Toggle("Ask where to save each time", isOn: $askWhereToSave)
                 Toggle("Add header and page numbers", isOn: $printHeaderFooter)
+                Picker("Paper size", selection: $paperSize) {
+                    ForEach(PaperSize.allCases) { Text($0.label).tag($0.rawValue) }
+                }
+                Picker("Margins", selection: $margins) {
+                    ForEach(PageMargins.allCases) { Text($0.label).tag($0.rawValue) }
+                }
             }
             Section("Tabs") {
                 Toggle("Reopen tabs from last session", isOn: $restoreTabs)
                 Toggle("Scroll to edits when a file changes", isOn: $followEdits)
+                Toggle("Show preview while editing", isOn: Binding(
+                    get: { editPreview }, set: { AppState.shared.setPreviewWhileEditing($0) }))
             }
             Section("Other") {
                 HStack {

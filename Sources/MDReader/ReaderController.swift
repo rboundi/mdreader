@@ -19,6 +19,9 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
     /// Collapsed section ids for a file, and changes to them.
     var foldsFor: ((URL) -> [String])?
     var onFolds: (([String]) -> Void)?
+    /// How far down the page the reader is (0–1), and how many words are selected.
+    var onProgress: ((Double) -> Void)?
+    var onSelectionWords: ((Int) -> Void)?
 
     private let templateURL = Bundle.main.resourceURL?.appendingPathComponent("web/index.html")
     private var ready = false
@@ -31,6 +34,7 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
     private var appliedTheme: String?
     private var appliedFlags: [Bool]?
     private var appliedCSS: String?
+    private var appliedLineHeight: String?
     private var customCSS = CustomCSS.read()
     private var cssWatcher: FileWatcher?
     private var printCompletion: ((Bool) -> Void)?
@@ -115,6 +119,8 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
             "folds": foldsFor?(tab.url) ?? [],
             "offset": offset,
             "sync": sync,
+            // While editing, the page follows the editor instead of jumping to changes.
+            "follow": !tab.editing,
             "anchor": anchor,
             "md": tab.displayText,
             "source": tab.showSource,
@@ -255,18 +261,23 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
         let width = Prefs.width
         let theme = Prefs.appearanceMode == .sepia ? "sepia" : ""
         let defaults = UserDefaults.standard
-        let flags = [Prefs.wrapCode, Prefs.numberHeadings, Prefs.followEdits, Prefs.lineNumbers]
-            .map(defaults.bool(forKey:))
+        let flags = [
+            Prefs.wrapCode, Prefs.numberHeadings, Prefs.followEdits, Prefs.lineNumbers, Prefs.smartPunctuation,
+            Prefs.codeLineNumbers, Prefs.justify,
+        ].map(defaults.bool(forKey:))
+        let lineHeight = defaults.string(forKey: Prefs.lineHeight) ?? "normal"
         if ready,
             font != appliedFont || width != appliedWidth || theme != appliedTheme || flags != appliedFlags
-                || customCSS != appliedCSS
+                || customCSS != appliedCSS || lineHeight != appliedLineHeight
         {
             appliedFont = font
             appliedWidth = width
             appliedTheme = theme
             appliedFlags = flags
             appliedCSS = customCSS
+            appliedLineHeight = lineHeight
             let options: [String: Any] = [
+                "smart": flags[4], "codeLineNumbers": flags[5], "justify": flags[6], "lineHeight": lineHeight,
                 "font": font.rawValue, "width": width.pixels, "theme": theme,
                 "wrap": flags[0], "numbers": flags[1], "followEdits": flags[2], "lineNumbers": flags[3],
                 "css": customCSS,
@@ -328,11 +339,13 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
     private func runPrint(showPanel: Bool, saveTo url: URL?, completion: @escaping (Bool) -> Void) {
         guard let window = webView.window, printCompletion == nil else { return completion(false) }
         let info = (NSPrintInfo.shared.copy() as? NSPrintInfo) ?? NSPrintInfo()
-        info.paperSize = NSPrintInfo.shared.paperSize
-        info.topMargin = 42
-        info.bottomMargin = 42
-        info.leftMargin = 42
-        info.rightMargin = 42
+        let paper = PaperSize(rawValue: UserDefaults.standard.string(forKey: Prefs.paperSize) ?? "") ?? .system
+        info.paperSize = paper.size ?? NSPrintInfo.shared.paperSize
+        let margin = (PageMargins(rawValue: UserDefaults.standard.string(forKey: Prefs.margins) ?? "") ?? .normal).points
+        info.topMargin = margin
+        info.bottomMargin = margin
+        info.leftMargin = margin
+        info.rightMargin = margin
         info.horizontalPagination = .fit
         info.verticalPagination = .automatic
         info.isHorizontallyCentered = false
@@ -412,6 +425,7 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
         appliedTheme = nil
         appliedFlags = nil
         appliedCSS = nil
+        appliedLineHeight = nil
         applyOptions()
         if let payload = pendingRender {
             pendingRender = nil
@@ -457,6 +471,13 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
             if let key = currentKey, let y = body["y"] as? NSNumber {
                 scrollPositions[key] = y.doubleValue
             }
+            if let progress = body["progress"] as? NSNumber { onProgress?(progress.doubleValue) }
+        case "selection":
+            onSelectionWords?((body["words"] as? NSNumber)?.intValue ?? 0)
+        case "copyLink":
+            if let id = body["id"] as? String, !id.isEmpty { webView.onCopyHeadingLink?(id) }
+        case "preview":
+            if let href = body["href"] as? String, let seq = body["seq"] as? NSNumber { preview(href, seq: seq.intValue) }
         case "outline":
             let items = (body["items"] as? [[String: Any]] ?? []).compactMap { item -> OutlineItem? in
                 guard let id = item["id"] as? String, let text = item["text"] as? String,
@@ -481,6 +502,9 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
         case "context":
             webView.contextHeading = body["heading"] as? String ?? ""
             webView.contextDiagram = (body["diagram"] as? NSNumber)?.intValue ?? -1
+            webView.contextTable = (body["table"] as? NSNumber)?.intValue ?? -1
+            webView.contextTeX = body["tex"] as? String ?? ""
+            webView.contextImage = (body["image"] as? String).flatMap(URL.init(string:)).flatMap { $0.isFileURL ? $0 : nil }
         case "folds":
             onFolds?(body["ids"] as? [String] ?? [])
         case "links":
@@ -495,6 +519,40 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
         default:
             break
         }
+    }
+
+    /// Reads a linked note for the hover preview.
+    private func preview(_ href: String, seq: Int) {
+        guard var parts = URLComponents(string: href) else { return }
+        parts.fragment = nil
+        parts.query = nil
+        guard let url = parts.url, url.isFileURL else { return }
+        Task {
+            let text = await Task.detached(priority: .userInitiated) { () -> String? in
+                guard MarkdownFiles.canOpen(url), let data = try? Data(contentsOf: url) else { return nil }
+                return String(decoding: data.prefix(1_000_000), as: UTF8.self)
+            }.value
+            guard let text else { return }
+            webView.callAsyncJavaScript(
+                "window.mdr.showPreview(s, md)", arguments: ["s": seq, "md": text], in: nil, in: .page,
+                completionHandler: nil)
+        }
+    }
+
+    /// A table from the page as tab-separated text (pastes as cells) or CSV.
+    func copyTable(_ index: Int, csv: Bool) {
+        webView.callAsyncJavaScript("return window.mdr.tableText(i, c)", arguments: ["i": index, "c": csv], in: nil, in: .page) {
+            result in
+            guard case .success(let value) = result, let text = value as? String else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        }
+    }
+
+    /// Scrolls the page to the part of the Markdown at `offset` (following the editor).
+    func showOffset(_ offset: Int) {
+        webView.callAsyncJavaScript(
+            "window.mdr.showOffset(o)", arguments: ["o": offset], in: nil, in: .page, completionHandler: nil)
     }
 
     /// Tells the page which of its links to local files point at nothing.
@@ -641,7 +699,11 @@ final class ReaderWebView: WKWebView {
     var contextHeading = ""
     /// Index of the diagram under the last right-click, or -1.
     var contextDiagram = -1
+    var contextTable = -1
+    var contextTeX = ""
+    var contextImage: URL?
     var onCopyDiagram: ((Int) -> Void)?
+    var onCopyTable: ((Int, Bool) -> Void)?
     var onSaveDiagram: ((Int, Bool) -> Void)?
 
     private static let hiddenMenuItems = [
@@ -676,9 +738,57 @@ final class ReaderWebView: WKWebView {
                 menu.insertItem(item, at: 0)
             }
         }
+        var extra: [NSMenuItem] = []
+        if contextTable >= 0 {
+            extra.append(item("Copy Table", #selector(copyTable(_:)), tag: contextTable))
+            extra.append(item("Copy Table as CSV", #selector(copyTableCSV(_:)), tag: contextTable))
+        }
+        if !contextTeX.isEmpty {
+            extra.append(item("Copy LaTeX", #selector(copyTeX(_:)), object: contextTeX))
+        }
+        if let image = contextImage {
+            extra.append(item("Open Image in Preview", #selector(openImage(_:)), object: image))
+            extra.append(item("Show Image in Finder", #selector(revealImage(_:)), object: image))
+        }
+        if !extra.isEmpty {
+            if !menu.items.isEmpty { menu.insertItem(.separator(), at: 0) }
+            extra.reversed().forEach { menu.insertItem($0, at: 0) }
+        }
         contextHeading = ""
         contextDiagram = -1
+        contextTable = -1
+        contextTeX = ""
+        contextImage = nil
         super.willOpenMenu(menu, with: event)
+    }
+
+    private func item(_ title: String, _ action: Selector, tag: Int = 0, object: Any? = nil) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        item.tag = tag
+        item.representedObject = object
+        return item
+    }
+
+    @objc private func copyTable(_ sender: NSMenuItem) { onCopyTable?(sender.tag, false) }
+    @objc private func copyTableCSV(_ sender: NSMenuItem) { onCopyTable?(sender.tag, true) }
+
+    @objc private func copyTeX(_ sender: NSMenuItem) {
+        guard let tex = sender.representedObject as? String else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(tex, forType: .string)
+    }
+
+    @objc private func openImage(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        if let preview = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Preview") {
+            NSWorkspace.shared.open([url], withApplicationAt: preview, configuration: NSWorkspace.OpenConfiguration())
+        }
+    }
+
+    @objc private func revealImage(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 
     @objc private func copyDiagram(_ sender: NSMenuItem) { onCopyDiagram?(sender.tag) }

@@ -509,3 +509,37 @@ test("version numbers sort as versions, not decimals", () => {
   c.querySelector("th").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
   same([...c.querySelectorAll("tbody td")].map((td) => td.textContent), ["1.2.0", "1.9.0", "1.10.0"]);
 });
+
+test("smart punctuation, when on, leaves code alone", () => {
+  const { window, render } = setup();
+  window.mdr.setOptions({ smart: true });
+  const c = render("\"Quoted\" and 'single' -- dash --- em... it's\n\n`\"code\" -- here`");
+  assert.equal(c.querySelector("p").textContent, "“Quoted” and ‘single’ – dash — em… it’s");
+  assert.equal(c.querySelector("code").textContent, "\"code\" -- here");
+});
+
+test("tables copy as TSV or CSV; headings get a copy-link button; code keeps its text", () => {
+  const { window, render, messages } = setup();
+  const c = render("## Title\n\n| a | b |\n|---|---|\n| 1 | x, y |\n\n```js\nlet a = 1;\n\nlet b = 2;\n```");
+  assert.equal(window.mdr.tableText(0, false), "a\tb\n1\tx, y");
+  assert.equal(window.mdr.tableText(0, true), 'a,b\n1,"x, y"');
+  c.querySelector("h2 .anchor-link").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  same(messages.findLast((m) => m.type === "copyLink"), { type: "copyLink", id: "title" });
+  assert.equal(c.querySelector("h2").textContent, "Title");
+  const code = c.querySelector("pre code");
+  assert.equal(code.querySelectorAll(".line").length, 3);
+  assert.equal(code.textContent, "let a = 1;\n\nlet b = 2;\n");
+});
+
+test("a hovered link to another note shows the linked section", async () => {
+  const { window, render, messages } = setup();
+  const c = render("[see](other.md#setup)");
+  c.querySelector("a").dispatchEvent(new window.MouseEvent("mouseover", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 600));
+  const ask = messages.findLast((m) => m.type === "preview");
+  assert.equal(ask.href, "file:///tmp/docs/other.md#setup");
+  window.mdr.showPreview(ask.seq, "# Other\n\nIntro\n\n## Setup\n\nInstall it.\n\n## Next\n\nLater");
+  const tip = window.document.querySelector(".link-preview");
+  assert.match(tip.textContent, /Setup\s+Install it\./);
+  assert.doesNotMatch(tip.textContent, /Intro|Later/);
+});

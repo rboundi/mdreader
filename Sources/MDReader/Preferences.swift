@@ -41,6 +41,39 @@ enum ContentWidth: String, CaseIterable, Identifiable {
     }
 }
 
+enum PaperSize: String, CaseIterable, Identifiable {
+    case system, a4, letter
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .system: return "Printer default"
+        case .a4: return "A4"
+        case .letter: return "US Letter"
+        }
+    }
+    /// Points, or nil for the printer's default.
+    var size: NSSize? {
+        switch self {
+        case .system: return nil
+        case .a4: return NSSize(width: 595.28, height: 841.89)
+        case .letter: return NSSize(width: 612, height: 792)
+        }
+    }
+}
+
+enum PageMargins: String, CaseIterable, Identifiable {
+    case narrow, normal, wide
+    var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+    var points: CGFloat {
+        switch self {
+        case .narrow: return 28
+        case .normal: return 42
+        case .wide: return 72
+        }
+    }
+}
+
 /// UserDefaults keys and helpers. Everything the app remembers lives here.
 enum Prefs {
     static let appearance = "appearance"
@@ -68,6 +101,14 @@ enum Prefs {
     static let searchScope = "searchScope"
     static let foldMemory = "foldMemory"
     static let sidebarWidth = "sidebarWidth"
+    static let editPreview = "editPreview"
+    static let smartPunctuation = "smartPunctuation"
+    static let codeLineNumbers = "codeLineNumbers"
+    static let lineHeight = "lineHeight"
+    static let justify = "justify"
+    static let paperSize = "paperSize"
+    static let margins = "margins"
+    static let filesSort = "filesSort"
 
     static var defaultPDFFolder: String {
         FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first?.path
@@ -107,6 +148,14 @@ enum Prefs {
             numberHeadings: false,
             followEdits: true,
             lineNumbers: false,
+            editPreview: true,
+            smartPunctuation: false,
+            codeLineNumbers: false,
+            lineHeight: "normal",
+            justify: false,
+            paperSize: PaperSize.system.rawValue,
+            margins: PageMargins.normal.rawValue,
+            filesSort: "name",
         ])
     }
 

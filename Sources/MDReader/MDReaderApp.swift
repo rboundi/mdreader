@@ -147,6 +147,7 @@ struct AppCommands: Commands {
     @AppStorage(Prefs.appearance) private var appearance = AppearanceMode.system.rawValue
     @AppStorage(Prefs.contentWidth) private var contentWidth = ContentWidth.medium.rawValue
     @AppStorage(Prefs.lineNumbers) private var lineNumbers = false
+    @AppStorage(Prefs.editPreview) private var editPreview = true
 
     var body: some Commands {
         CommandGroup(after: .appInfo) {
@@ -155,6 +156,8 @@ struct AppCommands: Commands {
         }
 
         CommandGroup(replacing: .newItem) {
+            Button("New Document") { state.newDocument() }
+                .keyboardShortcut("n")
             Button("Open…") { state.showOpenPanel() }
                 .keyboardShortcut("o")
             Menu("Open Recent") {
@@ -221,7 +224,24 @@ struct AppCommands: Commands {
                 .disabled(state.selected == nil)
         }
 
+        CommandMenu("Format") {
+            Button("Bold") { state.editor.toggleWrap("**") }
+                .keyboardShortcut("b")
+                .disabled(state.selected?.editing != true)
+            Button("Italic") { state.editor.toggleWrap("*") }
+                .keyboardShortcut("i")
+                .disabled(state.selected?.editing != true)
+            Button("Code") { state.editor.toggleWrap("`") }
+                .keyboardShortcut("`", modifiers: [.command, .shift])
+                .disabled(state.selected?.editing != true)
+            Button("Link") { state.editor.insertLink() }
+                .keyboardShortcut("k")
+                .disabled(state.selected?.editing != true)
+        }
+
         CommandGroup(after: .pasteboard) {
+            Button("Copy HTML") { state.copyHTML() }
+                .disabled(state.selected == nil || state.selected?.editing == true)
             Button("Copy as Rich Text") { state.copyRichText() }
                 .keyboardShortcut("c", modifiers: [.command, .option])
                 .disabled(state.selected == nil || state.selected?.editing == true)
@@ -262,6 +282,8 @@ struct AppCommands: Commands {
             .keyboardShortcut("/")
             .disabled(state.selected == nil)
             Toggle("Line Numbers in Markdown Source", isOn: $lineNumbers)
+            Toggle("Preview While Editing", isOn: Binding(
+                get: { editPreview }, set: { state.setPreviewWhileEditing($0) }))
             Button("Collapse All Sections") { state.foldAll(true) }
                 .disabled(state.selected == nil || state.selected?.showSource == true)
             Button("Expand All Sections") { state.foldAll(false) }

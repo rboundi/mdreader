@@ -20,30 +20,34 @@
 - Wiki links: `[[Note]]`, `[[Note|label]]` and `[[Note#Heading]]` open `Note.md` from the same folder
 - An image on its own line gets its alt text as a caption
 - Links to missing files or headings are struck through
-- Syntax-highlighted code blocks with a copy button, optionally wrapping long lines
+- Syntax-highlighted code blocks with a language label and a copy button, optionally with line numbers or wrapped lines
 - Math with `$inline$`, `$$display$$` or ```` ```math ```` blocks (KaTeX)
 - Diagrams from ```` ```mermaid ```` blocks: flowchart, sequence, class, state, ER, Gantt, pie and more
 - Rendered or Markdown source view (<kbd>⌘</kbd><kbd>/</kbd>), staying at the same section, with optional line numbers
 - Focus mode hides the tabs, toolbar and sidebar (<kbd>⇧</kbd><kbd>⌘</kbd><kbd>F</kbd>, <kbd>Esc</kbd> to leave)
 - Footnotes show on hover
-- Sidebar with the document outline or the other Markdown files in the folder. Drag its edge to resize it
+- Sidebar with the document outline or the folder's Markdown files and subfolders, with a filter and sorting by name or date. Drag its edge to resize it
 - Collapsible sections, remembered per file. **View → Collapse All Sections**, or <kbd>⌥</kbd>-click an arrow to fold every section at that level
 - Click a table header to sort by that column
 - Right-click a diagram to copy it or save it as PNG or SVG
-- Hover a link to see where it goes
+- Hover a link to see where it goes; links to other notes show a preview of the linked section
+- Right-click a table to copy it (pastes as cells in Numbers or Excel) or as CSV, a formula to copy its LaTeX, or an image to open it in Preview
+- Hover a heading and click **#** to copy a link to it
 - Image zoom and a reading progress bar
 - Optional heading numbers (1, 1.1, 1.2) in the document and the outline
 - Keyboard reading: <kbd>j</kbd> / <kbd>k</kbd> to scroll, <kbd>n</kbd> / <kbd>p</kbd> for the next or previous heading, <kbd>g</kbd> / <kbd>G</kbd> for the top or bottom
 - Back and Forward after following links, also with a two-finger swipe or the mouse side buttons
 - Jump to Heading (<kbd>⇧</kbd><kbd>⌘</kbd><kbd>J</kbd>)
 - Reopens each file where you left off
-- Word count, reading time, tasks done and last modified date in the title bar
+- Word count, time left, tasks done and last modified date in the title bar; the word count of a selection
 - The front matter `title:` is used as the tab and window title
 - Live reload when the file changes on disk, scrolling to the part that changed
 - Find in page, and search across open tabs or the folder (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>F</kbd>)
 
 **Tabs**
-- Drag to reorder, or drag a tab to Finder or another app to use the file. Right-click to close others or reveal in Finder
+- Drag to reorder, or drag a tab to Finder or another app to use the file. Middle-click to close
+- Right-click to rename, duplicate, close others or reveal in Finder
+- A dot on a tab whose file changed while you were looking at another one
 - Quick Open (<kbd>⌘</kbd><kbd>P</kbd>) for open tabs, recent files and files in the same folder
 - Reopen closed tabs with <kbd>⇧</kbd><kbd>⌘</kbd><kbd>T</kbd> or from **File → Recently Closed**
 - Tabs are restored on relaunch
@@ -51,17 +55,19 @@
 - Right-click a heading to copy a link to it
 
 **Export**
-- PDF (<kbd>⌘</kbd><kbd>E</kbd>), saved to the Desktop by default, with page numbers and clickable links
+- PDF (<kbd>⌘</kbd><kbd>E</kbd>), saved to the Desktop by default, with page numbers and clickable links, in A4 or US Letter
 - HTML (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>E</kbd>), a single file with styles and images embedded
-- Copy as Rich Text (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>C</kbd>) for Mail, Notes, Pages or Google Docs
+- Copy as Rich Text (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>C</kbd>) for Mail, Notes, Pages or Google Docs, or **Edit → Copy HTML** for the HTML itself
 
 **Appearance**
-- Light, Sepia, Dark or System theme
-- Sans or serif font, text size and text width
+- Light, Sepia, Dark or System theme; images are dimmed slightly in dark mode
+- Sans or serif font, text size, text width and line spacing, justified text, smart quotes and dashes
 - Your own styles in `~/Library/Application Support/MDReader/custom.css` (**Settings → Custom CSS → Edit…**)
 
 **Editing**
-- **Edit** (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>O</kbd>) switches to a plain text editor; <kbd>⌘</kbd><kbd>S</kbd> saves
+- **Edit** (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>O</kbd>) switches to a text editor with the rendered page beside it; <kbd>⌘</kbd><kbd>S</kbd> saves
+- <kbd>⌘</kbd><kbd>B</kbd>, <kbd>⌘</kbd><kbd>I</kbd> and <kbd>⌘</kbd><kbd>K</kbd> for bold, italic and links; lists continue when you press Return
+- **New Document** (<kbd>⌘</kbd><kbd>N</kbd>)
 - To edit in another app instead, choose it in **Settings → Edit with**. Changes show as soon as you save
 
 **Other**
@@ -104,13 +110,14 @@ Select a `.md` file in Finder, press <kbd>⌘</kbd><kbd>I</kbd>, choose MDReader
 
 | Action | Shortcut |
 |---|---|
-| Open | <kbd>⌘</kbd><kbd>O</kbd> |
+| New document / Open | <kbd>⌘</kbd><kbd>N</kbd> / <kbd>⌘</kbd><kbd>O</kbd> |
 | Quick Open | <kbd>⌘</kbd><kbd>P</kbd> |
 | Open Clipboard | <kbd>⇧</kbd><kbd>⌘</kbd><kbd>V</kbd> |
 | Back / Forward | <kbd>⌘</kbd><kbd>[</kbd> / <kbd>⌘</kbd><kbd>]</kbd> |
 | Jump to Heading | <kbd>⇧</kbd><kbd>⌘</kbd><kbd>J</kbd> |
 | Edit / stop editing | <kbd>⌥</kbd><kbd>⌘</kbd><kbd>O</kbd> |
 | Save | <kbd>⌘</kbd><kbd>S</kbd> |
+| Bold / italic / link (editing) | <kbd>⌘</kbd><kbd>B</kbd> / <kbd>⌘</kbd><kbd>I</kbd> / <kbd>⌘</kbd><kbd>K</kbd> |
 | Focus mode | <kbd>⇧</kbd><kbd>⌘</kbd><kbd>F</kbd> |
 | Close tab / reopen closed tab | <kbd>⌘</kbd><kbd>W</kbd> / <kbd>⇧</kbd><kbd>⌘</kbd><kbd>T</kbd> |
 | Next / previous tab | <kbd>⌃</kbd><kbd>Tab</kbd> / <kbd>⌃</kbd><kbd>⇧</kbd><kbd>Tab</kbd> |

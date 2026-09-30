@@ -29,6 +29,9 @@ final class AppState: ObservableObject {
             // While restoring, only the finally selected tab is rendered (see restoreTabs).
             if !restoring {
                 reader.display(selected)
+                selected?.changedInBackground = false
+                selectionWords = 0
+                minutesLeft = nil
                 if let tab = selected, tab.editing {
                     editor.show(tab)
                     editor.prepare(offset: nil)
@@ -62,6 +65,12 @@ final class AppState: ObservableObject {
     @Published var focusMode = false
     /// Sidebar width while its edge is being dragged.
     @Published var sidebarDragWidth: Double?
+    /// Words in the current selection, and reading time left (nil at the top or bottom of the page).
+    @Published private(set) var selectionWords = 0
+    @Published private(set) var minutesLeft: Int?
+    /// Subfolders of the current document's folder, for the Files sidebar.
+    @Published private(set) var folderSubfolders: [URL] = []
+    private var filesSort = UserDefaults.standard.string(forKey: Prefs.filesSort) ?? "name"
     @Published private(set) var canGoBack = false
     @Published private(set) var canGoForward = false
     @Published var availableUpdate: UpdateChecker.Release?
@@ -117,6 +126,15 @@ final class AppState: ObservableObject {
         reader.webView.onCopyDiagram = { [weak self] index in self?.reader.copyDiagram(index) }
         reader.webView.onSaveDiagram = { [weak self] index, svg in self?.reader.saveDiagram(index, asSVG: svg) }
         editor.onDirtyChange = { [weak self] in self?.objectWillChange.send() }
+        reader.onProgress = { [weak self] progress in self?.updateTimeLeft(progress) }
+        reader.onSelectionWords = { [weak self] words in self?.setSelectionWords(words) }
+        editor.onSelectionWords = { [weak self] words in self?.setSelectionWords(words) }
+        reader.webView.onCopyTable = { [weak self] index, csv in self?.reader.copyTable(index, csv: csv) }
+        // The preview beside the editor follows the editor's scrolling.
+        editor.onScroll = { [weak self] offset in
+            guard let self, self.selected?.editing == true, self.previewWhileEditing else { return }
+            self.reader.showOffset(offset)
+        }
         // Keeps the outline (drawn from the page underneath) in step with the draft.
         editor.onTextChange = { [weak self] tab in
             if tab.id == self?.selectedID { self?.reader.display(tab) }
@@ -124,7 +142,10 @@ final class AppState: ObservableObject {
         NotificationCenter.default.addObserver(
             forName: UserDefaults.didChangeNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.editor.themeMayHaveChanged() }
+            MainActor.assumeIsolated {
+                self?.editor.themeMayHaveChanged()
+                self?.filesSortMayHaveChanged()
+            }
         }
     }
 
@@ -187,15 +208,9 @@ final class AppState: ObservableObject {
                     }
                 }
             } else {
-                let tab = DocTab(url: url)
+                let tab = makeTab(url)
                 tab.pendingAnchor = anchor?.isEmpty == false ? anchor : nil
                 if tab.pendingAnchor == nil { tab.pendingScroll = scroll ?? scrollMemory[url.path]?.first }
-                tab.onChange = { [weak self, weak tab] in
-                    guard let self, let tab else { return }
-                    if tab.id == self.selectedID { self.reader.display(tab) }
-                    if tab.editing { self.fileChangedWhileEditing(tab) }
-                    self.objectWillChange.send()
-                }
                 tabs.insert(tab, at: min(insertAt, tabs.count))
                 insertAt += 1
                 lastID = tab.id
@@ -213,6 +228,40 @@ final class AppState: ObservableObject {
         } else if !emptyFolders.isEmpty {
             show(Toast(message: "No Markdown files in \(emptyFolders.joined(separator: ", "))"))
         }
+    }
+
+    private func makeTab(_ url: URL) -> DocTab {
+        let tab = DocTab(url: url)
+        tab.onChange = { [weak self, weak tab] in
+            guard let self, let tab else { return }
+            if tab.id == self.selectedID {
+                self.reader.display(tab)
+            } else if tab.textChanged {
+                tab.changedInBackground = true
+            }
+            if tab.editing { self.fileChangedWhileEditing(tab) }
+            self.objectWillChange.send()
+        }
+        return tab
+    }
+
+    /// Puts `url` in `old`'s place (after a rename or a first save), keeping selection and editing.
+    private func replaceTab(_ old: DocTab, with url: URL) {
+        guard let index = tabs.firstIndex(where: { $0 === old }) else { return }
+        let wasSelected = old.id == selectedID
+        let wasEditing = old.editing
+        editor.stopShowing(old)
+        reader.forget(old)
+        old.draft = nil
+        old.editing = false
+        let tab = makeTab(MarkdownFiles.canonical(url))
+        tab.pendingScroll = reader.lastScroll(for: old)
+        tab.showSource = wasEditing ? old.sourceBeforeEditing : old.showSource
+        tabs[index] = tab
+        if wasSelected { selectedID = tab.id }
+        addRecent(tab.url)
+        persistTabs()
+        if wasEditing, wasSelected { startEditing(tab) }
     }
 
     /// README, then index, then the first Markdown file by name.
@@ -307,10 +356,143 @@ final class AppState: ObservableObject {
     func removeOldClipboardFiles() {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("MDReader", isDirectory: true)
         let open = Set(tabs.map(\.url.path))
-        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
-        for file in files where !open.contains(file.standardizedFileURL.path) {
-            try? FileManager.default.removeItem(at: file)
+        for dir in [folder, folder.appendingPathComponent("Untitled")] {
+            let files = (try? FileManager.default.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: [.isDirectoryKey])) ?? []
+            for file in files where !open.contains(MarkdownFiles.canonical(file).path) {
+                if (try? file.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true { continue }
+                try? FileManager.default.removeItem(at: file)
+            }
         }
+    }
+
+    // MARK: New, rename, duplicate
+
+    /// ⌘N: an empty document in the editor; the first ⌘S asks where to save it.
+    func newDocument() {
+        let folder = DocTab.untitledFolder
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var url = folder.appendingPathComponent("Untitled.md")
+        var n = 2
+        while FileManager.default.fileExists(atPath: url.path) || tabs.contains(where: { $0.url == url }) {
+            url = folder.appendingPathComponent("Untitled \(n).md")
+            n += 1
+        }
+        guard (try? Data().write(to: url)) != nil else { return NSSound.beep() }
+        focusMode = false
+        open([url], remember: false, scroll: 0)
+        if let tab = selected, tab.url == MarkdownFiles.canonical(url) { startEditing(tab) }
+    }
+
+    /// Save panel for a new document. Returns false if cancelled or failed.
+    private func saveAs(_ tab: DocTab) -> Bool {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        panel.nameFieldStringValue = "Untitled.md"
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return false }
+        do {
+            try (tab.draft ?? tab.text).write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Couldn't save \(url.lastPathComponent)"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+            return false
+        }
+        let temporary = tab.url
+        replaceTab(tab, with: url)
+        try? FileManager.default.removeItem(at: temporary)
+        return true
+    }
+
+    func rename(_ tab: DocTab) {
+        guard !tab.isUntitled else { return }
+        guard !tab.isDirty || confirmClosing([tab]) else { return }
+        let field = NSTextField(string: tab.fileName)
+        field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
+        let alert = NSAlert()
+        alert.messageText = "Rename \(tab.fileName)"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        // Select the name without the extension, as Finder does.
+        DispatchQueue.main.async {
+            let base = (tab.fileName as NSString).deletingPathExtension as NSString
+            field.currentEditor()?.selectedRange = NSRange(location: 0, length: base.length)
+        }
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let name = field.stringValue.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty, !name.contains("/"), name != tab.fileName else { return }
+        let target = tab.url.deletingLastPathComponent().appendingPathComponent(name)
+        do {
+            try FileManager.default.moveItem(at: tab.url, to: target)
+        } catch {
+            return show(Toast(message: "Couldn't rename: \(error.localizedDescription)"))
+        }
+        let (from, to) = (tab.url.path, MarkdownFiles.canonical(target).path)
+        scrollMemory[to] = scrollMemory[from]
+        foldMemory[to] = foldMemory[from]
+        recents.removeAll { $0.path == from }
+        replaceTab(tab, with: target)
+    }
+
+    func duplicate(_ tab: DocTab) {
+        guard !tab.isUntitled else { return }
+        let folder = tab.url.deletingLastPathComponent()
+        let base = tab.url.deletingPathExtension().lastPathComponent
+        let ext = tab.url.pathExtension
+        var copy = folder.appendingPathComponent("\(base) copy").appendingPathExtension(ext)
+        var n = 2
+        while FileManager.default.fileExists(atPath: copy.path) {
+            copy = folder.appendingPathComponent("\(base) copy \(n)").appendingPathExtension(ext)
+            n += 1
+        }
+        do {
+            try FileManager.default.copyItem(at: tab.url, to: copy)
+            open([copy])
+        } catch {
+            show(Toast(message: "Couldn't duplicate: \(error.localizedDescription)"))
+        }
+    }
+
+    /// Copies the rendered HTML as text, for a CMS or an email template.
+    func copyHTML() {
+        guard let tab = selected, !tab.editing else { return }
+        ensureRendered()
+        reader.renderedHTML { [weak self] page in
+            guard let page else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(page.html, forType: .string)
+            self?.show(Toast(message: "Copied HTML"))
+        }
+    }
+
+    // MARK: Reading progress & selection
+
+    private func updateTimeLeft(_ progress: Double) {
+        var left: Int?
+        if let tab = selected, !tab.showSource, !tab.editing, tab.wordCount > 0, progress > 0.02, progress < 0.99 {
+            left = max(1, Int((Double(tab.wordCount) * (1 - progress) / 230).rounded(.up)))
+        }
+        if left != minutesLeft { minutesLeft = left }
+    }
+
+    private func setSelectionWords(_ words: Int) {
+        if words != selectionWords { selectionWords = words }
+    }
+
+    var previewWhileEditing: Bool { UserDefaults.standard.bool(forKey: Prefs.editPreview) }
+
+    /// Shows or hides the rendered page beside the editor.
+    func setPreviewWhileEditing(_ on: Bool) {
+        UserDefaults.standard.set(on, forKey: Prefs.editPreview)
+        guard let tab = selected, tab.editing else { return objectWillChange.send() }
+        tab.showSource = !on
+        tab.pendingOffset = editor.topOffset
+        reader.display(tab)
+        objectWillChange.send()
     }
 
     /// ⇧⌘T: bring back the most recently closed tab that still exists on disk.
@@ -406,11 +588,14 @@ final class AppState: ObservableObject {
             guard let self, !tab.editing, tab.id == self.selectedID else { return }
             tab.sourceBeforeEditing = tab.showSource
             tab.editing = true
-            // The page underneath shows the source, so the outline lists the Markdown headings.
-            if !tab.showSource {
-                tab.showSource = true
-                if tab.id == self.selectedID { self.reader.display(tab) }
+            // The page shows the rendered draft beside the editor, or (hidden) the source, so the
+            // outline lists the Markdown headings either way.
+            let source = !self.previewWhileEditing
+            if tab.showSource != source {
+                tab.showSource = source
+                tab.pendingOffset = offset
             }
+            self.reader.display(tab)
             self.objectWillChange.send()
             self.editor.show(tab)
             self.editor.prepare(offset: offset)
@@ -443,6 +628,7 @@ final class AppState: ObservableObject {
 
     @discardableResult
     private func save(_ tab: DocTab) -> Bool {
+        if tab.isUntitled { return saveAs(tab) }
         // Changes a file watcher can miss (network volumes) shouldn't be overwritten silently.
         if tab.changedSinceLoad {
             let alert = NSAlert()
@@ -678,12 +864,52 @@ final class AppState: ObservableObject {
 
     private func listFolder() {
         guard let folder = watchedFolder else { return }
-        let files = Self.markdownFiles(in: folder)
+        let (folders, files) = Self.listing(of: folder, sort: filesSort)
         if files != folderFiles { folderFiles = files }
+        if folders != folderSubfolders { folderSubfolders = folders }
         // A file that was deleted and has come back (for example after switching git branches).
         for tab in tabs where tab.error != nil && tab.url.deletingLastPathComponent() == folder {
             if FileManager.default.fileExists(atPath: tab.url.path) { tab.reload() }
         }
+    }
+
+    /// Subfolders and Markdown files of a folder, for the Files sidebar. Hidden folders and
+    /// node_modules are left out. `sort` is "name" or "date" (newest first, for files).
+    static func listing(of folder: URL, sort: String) -> (folders: [URL], files: [URL]) {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        var folders: [URL] = []
+        var files: [URL] = []
+        for name in names where !name.hasPrefix(".") {
+            let url = folder.appendingPathComponent(name).standardizedFileURL
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else { continue }
+            if isDirectory.boolValue {
+                if name != "node_modules", !name.hasSuffix(".app") { folders.append(url) }
+            } else if MarkdownFiles.isMarkdownDocument(url) {
+                files.append(url)
+            }
+        }
+        let byName: (URL, URL) -> Bool = {
+            $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending
+        }
+        folders.sort(by: byName)
+        if sort == "date" {
+            let date = { (url: URL) in
+                (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            }
+            let dates = Dictionary(uniqueKeysWithValues: files.map { ($0, date($0)) })
+            files.sort { dates[$0]! > dates[$1]! }
+        } else {
+            files.sort(by: byName)
+        }
+        return (folders, files)
+    }
+
+    private func filesSortMayHaveChanged() {
+        let sort = UserDefaults.standard.string(forKey: Prefs.filesSort) ?? "name"
+        guard sort != filesSort else { return }
+        filesSort = sort
+        listFolder()
     }
 
     /// Markdown files in a folder, sorted by name. Works when the folder path is a symlink.
