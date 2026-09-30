@@ -171,31 +171,27 @@ enum CustomCSS {
 }
 
 /// Colors shared between the native chrome and the rendered page (keep in sync with style.css).
+/// Computed on each use: macOS only re-resolves dynamic colors between light and dark, and Light and
+/// Sepia are both light, so a cached dynamic color would keep the old theme.
 enum Palette {
-    static let page = NSColor(name: nil) { appearance in
-        if Prefs.appearanceMode == .sepia {
-            return NSColor(srgbRed: 0xF7 / 255, green: 0xF0 / 255, blue: 0xE3 / 255, alpha: 1)
-        }
-        return appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            ? NSColor(srgbRed: 0x1c / 255, green: 0x1c / 255, blue: 0x1e / 255, alpha: 1)
-            : NSColor.white
+    private static func rgb(_ hex: UInt32) -> NSColor {
+        NSColor(
+            srgbRed: CGFloat(hex >> 16 & 0xFF) / 255, green: CGFloat(hex >> 8 & 0xFF) / 255,
+            blue: CGFloat(hex & 0xFF) / 255, alpha: 1)
     }
 
-    /// Body text, for the editor (keep in sync with --fg in style.css).
-    static let text = NSColor(name: nil) { appearance in
-        if Prefs.appearanceMode == .sepia {
-            return NSColor(srgbRed: 0x3D / 255, green: 0x33 / 255, blue: 0x26 / 255, alpha: 1)
-        }
-        return appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            ? NSColor(srgbRed: 0xE6 / 255, green: 0xE6 / 255, blue: 0xE8 / 255, alpha: 1)
-            : NSColor(srgbRed: 0x1F / 255, green: 0x23 / 255, blue: 0x28 / 255, alpha: 1)
+    /// A color that follows light and dark mode.
+    private static func lightDark(_ light: NSColor, _ dark: NSColor) -> NSColor {
+        NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light }
     }
+
+    private static var sepia: Bool { Prefs.appearanceMode == .sepia }
+
+    static var page: NSColor { sepia ? rgb(0xF7F0E3) : lightDark(.white, rgb(0x1C1C1E)) }
+
+    /// Body text, for the editor.
+    static var text: NSColor { sepia ? rgb(0x3D3326) : lightDark(rgb(0x1F2328), rgb(0xE6E6E8)) }
 
     /// Tab bar, sidebar and toolbar: the system window color, or a darker sepia.
-    static let chrome = NSColor(name: nil) { _ in
-        if Prefs.appearanceMode == .sepia {
-            return NSColor(srgbRed: 0xEC / 255, green: 0xE2 / 255, blue: 0xCF / 255, alpha: 1)
-        }
-        return .windowBackgroundColor
-    }
+    static var chrome: NSColor { sepia ? rgb(0xECE2CF) : .windowBackgroundColor }
 }
