@@ -97,11 +97,16 @@ if [[ "$MODE" == "--release" ]]; then
   echo "==> $DMG  sha256 $(shasum -a 256 "$DMG" | cut -d' ' -f1)"
 fi
 
+# Keep build copies out of Finder's "Open With" list; only the installed app should appear there.
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+"$LSREGISTER" -u "$PWD/$APP" 2>/dev/null || true
+"$LSREGISTER" -u "$PWD/build/dmg/MDReader.app" 2>/dev/null || true
+
 if [[ "$MODE" == "--install" ]]; then
   rm -rf /Applications/MDReader.app
   cp -R "$APP" /Applications/
   # Register with Launch Services so "Open With" picks it up immediately.
-  /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f /Applications/MDReader.app
+  "$LSREGISTER" -f /Applications/MDReader.app
   echo "==> Installed to /Applications/MDReader.app"
   for dir in /opt/homebrew/bin /usr/local/bin; do
     if [[ -w "$dir" ]]; then
