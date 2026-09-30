@@ -160,7 +160,8 @@
         h.id = id;
       }
       taken.add(h.id);
-      if (h.closest(".footnotes")) return;
+      // Only top-level headings can fold; ones inside HTML blocks, lists or quotes can't.
+      if (h.parentNode !== root) return;
       const fold = document.createElement("button");
       fold.className = "fold";
       fold.type = "button";
@@ -309,14 +310,13 @@
 
   function updateActive() {
     let current = null;
-    const all = headings();
+    const all = headings().filter((h) => !h.classList.contains("folded-away"));
     const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
     if (atBottom && window.scrollY > 0 && all.length) {
       // Short final sections never reach the top of the window; count them once we're at the end.
       current = all[all.length - 1].id;
     } else {
       for (const h of all) {
-        if (h.classList.contains("folded-away")) continue;
         if (h.getBoundingClientRect().top <= 90) current = h.id;
         else break;
       }
@@ -343,6 +343,10 @@
   async function render(p) {
     const token = ++renderToken;
     clearFind();
+    document.querySelector(".lightbox")?.remove();
+    // Re-rendering the same document (file changed on disk) keeps collapsed sections collapsed.
+    const keepFolds = p.scroll < 0 && !p.source
+      ? [...content.querySelectorAll(".collapsed")].map((h) => h.id) : [];
     if (p.clear) {
       content.replaceChildren();
       content.className = "";
@@ -372,6 +376,10 @@
     } else {
       content.className = "markdown-body";
       content.replaceChildren(renderMarkdown(p.md));
+      if (keepFolds.length) {
+        keepFolds.forEach((id) => document.getElementById(id)?.classList.add("collapsed"));
+        applyFolds();
+      }
     }
     sendOutline();
     updateProgress();
@@ -552,12 +560,20 @@
   function applyFolds() {
     let hideBelow = 0;
     for (const child of content.children) {
-      const level = headingLevel(child);
+      const level = headingLevel(child) || innerHeadingLevel(child);
       if (level && hideBelow && level <= hideBelow) hideBelow = 0;
       child.classList.toggle("folded-away", hideBelow > 0);
-      if (level && !hideBelow && child.classList.contains("collapsed")) hideBelow = level;
+      if (headingLevel(child) && !hideBelow && child.classList.contains("collapsed")) hideBelow = level;
     }
     updateProgress();
+    updateActive();
+  }
+
+  // Highest heading level inside a block such as <div align="center"><h1>…</h1></div>.
+  function innerHeadingLevel(el) {
+    const h = el.querySelector?.("h1, h2, h3, h4, h5, h6");
+    if (!h || h.closest(".footnotes")) return 0;
+    return Math.min(...[...el.querySelectorAll("h1, h2, h3, h4, h5, h6")].map(headingLevel));
   }
 
   function toggleFold(heading) {
@@ -673,8 +689,8 @@
 
   let scrollTimer = null;
   window.addEventListener("scroll", () => {
-    if (scrollTimer) return;
     updateProgress();
+    if (scrollTimer) return;
     scrollTimer = setTimeout(() => {
       scrollTimer = null;
       post({ type: "scroll", y: window.scrollY });

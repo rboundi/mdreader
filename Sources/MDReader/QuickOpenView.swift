@@ -65,7 +65,10 @@ struct QuickOpenView: View {
         .onAppear {
             focused = true
             keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                handleKey(event) ? nil : event
+                guard event.window === state.reader.webView.window,
+                    (event.window?.firstResponder as? NSTextView)?.hasMarkedText() != true
+                else { return event }
+                return handleKey(event) ? nil : event
             }
         }
         .onDisappear {

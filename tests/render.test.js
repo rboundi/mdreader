@@ -242,3 +242,30 @@ test("right-clicking a heading tells the app which one", () => {
   assert.equal(messages.findLast((m) => m.type === "context").heading, "setup-steps");
 });
 
+test("only top-level headings get a fold arrow; an HTML block with a heading ends a section", () => {
+  const { window, render } = setup();
+  const c = render('## A\n\none\n\n<div align="center">\n\n## Inside\n\n</div>\n\nafter');
+  const [a, inside] = c.querySelectorAll("h2");
+  assert.ok(a.querySelector(".fold"));
+  assert.equal(inside.querySelector(".fold"), null);
+  a.querySelector(".fold").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  assert.ok(!inside.closest("div").classList.contains("folded-away"));
+});
+
+test("collapsed sections stay collapsed when the file reloads", () => {
+  const { window, render } = setup();
+  let c = render("## A\n\none\n\n## B\n\ntwo");
+  c.querySelector("h2 .fold").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  c = render("## A\n\none, edited\n\n## B\n\ntwo", { scroll: -1 });
+  assert.ok(c.querySelector("#a").classList.contains("collapsed"));
+  assert.ok([...c.children].some((el) => el.classList.contains("folded-away")));
+});
+
+test("switching documents closes a zoomed image", () => {
+  const { window, render } = setup();
+  const c = render("![pic](pic.png)");
+  c.querySelector("img").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+  render("# Other");
+  assert.equal(window.document.querySelector(".lightbox"), null);
+});
+

@@ -19,7 +19,8 @@ final class AppState: ObservableObject {
     @Published var selectedID: UUID? {
         didSet {
             guard selectedID != oldValue else { return }
-            reader.display(selected)
+            // While restoring, only the finally selected tab is rendered (see restoreTabs).
+            if !restoring { reader.display(selected) }
             persistTabs()
             refreshFolder()
         }
@@ -68,8 +69,9 @@ final class AppState: ObservableObject {
         recents = (UserDefaults.standard.stringArray(forKey: Prefs.recentFiles) ?? [])
             .map { URL(fileURLWithPath: $0) }
         reader.onOpenFile = { [weak self] url, anchor, y in
-            self?.recordPosition(y: y)
-            self?.open([url], anchor: anchor)
+            guard let self else { return }
+            if MarkdownFiles.canOpen(url.standardizedFileURL) { self.recordPosition(y: y) }
+            self.open([url], anchor: anchor)
         }
         reader.onNavigate = { [weak self] y in self?.recordPosition(y: y) }
         reader.webView.onCopyHeadingLink = { [weak self] id in self?.copyLink(toHeading: id) }
@@ -92,10 +94,15 @@ final class AppState: ObservableObject {
         // New tabs go right after the current one, in the order they were given.
         var insertAt = selectedIndex.map { $0 + 1 } ?? tabs.count
         var skipped: [String] = []
+        var missing: [String] = []
         for raw in urls {
             let url = raw.standardizedFileURL
             guard MarkdownFiles.canOpen(url) else {
-                if FileManager.default.fileExists(atPath: url.path) { skipped.append(url.lastPathComponent) }
+                if FileManager.default.fileExists(atPath: url.path) {
+                    skipped.append(url.lastPathComponent)
+                } else {
+                    missing.append(url.lastPathComponent)
+                }
                 continue
             }
             if let existing = tabs.first(where: { $0.url == url }) {
@@ -132,6 +139,8 @@ final class AppState: ObservableObject {
         persistTabs()
         if !skipped.isEmpty {
             show(Toast(message: "Can't open \(skipped.joined(separator: ", ")): not a text file"))
+        } else if !missing.isEmpty, !restoring {
+            show(Toast(message: "\(missing.joined(separator: ", ")) not found"))
         }
     }
 
@@ -248,7 +257,11 @@ final class AppState: ObservableObject {
     func copyLink(toHeading id: String) {
         guard let tab = selected else { return }
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString("\(tab.url.lastPathComponent)#\(id)", forType: .string)
+        // Percent-encode so the link still works in Markdown when the name has spaces.
+        let name = tab.url.lastPathComponent.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed)
+            ?? tab.url.lastPathComponent
+        let anchor = id.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed) ?? id
+        NSPasteboard.general.setString("\(name)#\(anchor)", forType: .string)
         show(Toast(message: "Link copied"))
     }
 
@@ -496,7 +509,9 @@ final class AppState: ObservableObject {
 
     func clearRecents() {
         recents = []
+        scrollMemory = [:]
         UserDefaults.standard.removeObject(forKey: Prefs.recentFiles)
+        UserDefaults.standard.removeObject(forKey: Prefs.scrollMemory)
         NSDocumentController.shared.clearRecentDocuments(nil)
     }
 
@@ -539,6 +554,7 @@ final class AppState: ObservableObject {
             selectedID = tab.id
         }
         restoring = false
+        reader.display(selected)
         persistTabs()
     }
 }
