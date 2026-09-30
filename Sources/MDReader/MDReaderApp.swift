@@ -22,6 +22,7 @@ struct MDReaderApp: App {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
+        Prefs.migrateFromOldBundleID()
         Prefs.register()
         NSWindow.allowsAutomaticWindowTabbing = false
         NSApp.appearance = Prefs.appearanceMode.nsAppearance

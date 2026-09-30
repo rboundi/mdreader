@@ -7,7 +7,7 @@
 	<key>CFBundleDisplayName</key>
 	<string>MDReader</string>
 	<key>CFBundleIdentifier</key>
-	<string>io.github.rboundi.mdreader</string>
+	<string>com.movinapp.mdreader.macos</string>
 	<key>CFBundleExecutable</key>
 	<string>MDReader</string>
 	<key>CFBundleIconFile</key>
@@ -35,7 +35,7 @@
 	<key>MDRGitHubRepo</key>
 	<string>rboundi/mdreader</string>
 	<key>NSHumanReadableCopyright</key>
-	<string>MIT License</string>
+	<string>© 2026 movin'App. MIT License.</string>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>

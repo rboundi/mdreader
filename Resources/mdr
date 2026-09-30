@@ -3,7 +3,7 @@
 #   mdr README.md docs/*.md     open files as tabs
 #   cat notes.md | mdr          read Markdown from a pipe
 #   mdr                         bring MDReader to the front
-BUNDLE_ID="io.github.rboundi.mdreader"
+BUNDLE_ID="com.movinapp.mdreader.macos"
 TMP="${TMPDIR:-/tmp}"
 
 if [ $# -eq 0 ]; then

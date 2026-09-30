@@ -63,6 +63,23 @@ enum Prefs {
             ?? NSHomeDirectory() + "/Desktop"
     }
 
+    /// Copies settings saved under the pre-1.0.2 bundle ID, once. Must run before `register()`,
+    /// because registered defaults make every key look already set.
+    static func migrateFromOldBundleID() {
+        let defaults = UserDefaults.standard
+        let marker = "migratedFromOldBundleID"
+        guard !defaults.bool(forKey: marker) else { return }
+        defaults.set(true, forKey: marker)
+        guard let old = UserDefaults(suiteName: "io.github.rboundi.mdreader") else { return }
+        let keys = [
+            appearance, readingFont, zoom, pdfFolder, askWhereToSave, restoreTabs, openTabs,
+            recentFiles, contentWidth, printHeaderFooter, outlineVisible, checkForUpdates,
+        ]
+        for key in keys where defaults.object(forKey: key) == nil {
+            if let value = old.object(forKey: key) { defaults.set(value, forKey: key) }
+        }
+    }
+
     static func register() {
         UserDefaults.standard.register(defaults: [
             appearance: AppearanceMode.system.rawValue,

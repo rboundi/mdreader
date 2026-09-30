@@ -28,10 +28,16 @@ VERSION="$VERSION" ./build.sh --release
 ZIP="build/MDReader-$VERSION.zip"
 DMG="build/MDReader-$VERSION.dmg"
 
+# Version-less copies give a permanent link to the newest release:
+# https://github.com/rboundi/mdreader/releases/latest/download/MDReader.dmg
+cp "$DMG" build/MDReader.dmg
+cp "$ZIP" build/MDReader.zip
+
 echo "==> Publishing $TAG"
 git tag -a "$TAG" -m "MDReader $VERSION"
 git push -q origin "$TAG"
-gh release create "$TAG" "$DMG" "$ZIP" --repo "$REPO" --title "MDReader $VERSION" --generate-notes \
+gh release create "$TAG" "$DMG" "$ZIP" build/MDReader.dmg build/MDReader.zip --repo "$REPO" \
+  --title "MDReader $VERSION" --generate-notes \
   --notes "Universal build for macOS 13 or later. Download the .dmg and drag MDReader to Applications."
 
 echo "==> Updating the Homebrew cask"

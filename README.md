@@ -53,7 +53,7 @@ brew install --cask rboundi/tap/mdreader
 
 ### Download
 
-Download the `.dmg` from [Releases](https://github.com/rboundi/mdreader/releases), open it and drag MDReader to Applications. The app is signed and notarized by Apple.
+Download [MDReader.dmg](https://github.com/rboundi/mdreader/releases/latest/download/MDReader.dmg), open it and drag MDReader to Applications. The app is signed and notarized by Apple.
 
 ### Build from source
 
