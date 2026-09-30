@@ -150,78 +150,81 @@ struct AppCommands: Commands {
     @AppStorage(Prefs.editPreview) private var editPreview = true
 
     var body: some Commands {
-        CommandGroup(after: .appInfo) {
-            Button("Check for Updates…") { state.checkForUpdatesNow() }
-            Button("Install Command Line Tool…") { state.installCommandLineTool() }
-        }
+        // Grouped: older SDKs (as on CI) allow at most 10 items per builder.
+        Group {
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { state.checkForUpdatesNow() }
+                Button("Install Command Line Tool…") { state.installCommandLineTool() }
+            }
 
-        CommandGroup(replacing: .newItem) {
-            Button("New Document") { state.newDocument() }
-                .keyboardShortcut("n")
-            Button("Open…") { state.showOpenPanel() }
-                .keyboardShortcut("o")
-            Menu("Open Recent") {
-                ForEach(state.recents, id: \.self) { url in
-                    Button(menuTitle(url, among: state.recents)) { state.open([url]) }
+            CommandGroup(replacing: .newItem) {
+                Button("New Document") { state.newDocument() }
+                    .keyboardShortcut("n")
+                Button("Open…") { state.showOpenPanel() }
+                    .keyboardShortcut("o")
+                Menu("Open Recent") {
+                    ForEach(state.recents, id: \.self) { url in
+                        Button(menuTitle(url, among: state.recents)) { state.open([url]) }
+                    }
+                    Divider()
+                    Button("Clear Menu") { state.clearRecents() }
+                        .disabled(state.recents.isEmpty)
                 }
                 Divider()
-                Button("Clear Menu") { state.clearRecents() }
-                    .disabled(state.recents.isEmpty)
-            }
-            Divider()
-            Button(state.selected?.editing == true ? "Stop Editing" : state.editorName.map { "Edit in \($0)" } ?? "Edit") {
-                state.edit()
-            }
-            .keyboardShortcut("o", modifiers: [.command, .option])
-            .disabled(state.selected == nil)
-            Button("Save") { state.save() }
-                .keyboardShortcut("s")
-                .disabled(state.selected?.isDirty != true)
-            Divider()
-            Button("Open Clipboard") { state.openClipboard() }
-                .keyboardShortcut("v", modifiers: [.command, .shift])
-            Divider()
-            Button("Reopen Closed Tab") { state.reopenClosedTab() }
-                .keyboardShortcut("t", modifiers: [.command, .shift])
-                .disabled(state.closedTabs.isEmpty)
-            Menu("Recently Closed") {
-                ForEach(state.recentlyClosed, id: \.self) { url in
-                    Button(menuTitle(url, among: state.recentlyClosed)) { state.reopen(url) }
+                Button(state.selected?.editing == true ? "Stop Editing" : state.editorName.map { "Edit in \($0)" } ?? "Edit") {
+                    state.edit()
                 }
-            }
-            .disabled(state.closedTabs.isEmpty)
-            Button("Close Tab") { state.closeTabOrWindow() }
-                .keyboardShortcut("w")
-        }
-
-        CommandGroup(replacing: .saveItem) {
-            Button("Export as PDF…") { state.exportPDF() }
-                .keyboardShortcut("e")
-                .disabled(state.selected == nil || state.selected?.editing == true)
-            Button("Export as HTML…") { state.exportHTML() }
-                .keyboardShortcut("e", modifiers: [.command, .option])
-                .disabled(state.selected == nil || state.selected?.editing == true)
-        }
-
-        CommandGroup(replacing: .printItem) {
-            Button("Print…") { state.printDocument() }
-                .keyboardShortcut("p", modifiers: [.command, .shift])
-                .disabled(state.selected == nil || state.selected?.editing == true)
-        }
-
-        CommandMenu("Go") {
-            Button("Back") { state.goBack() }
-                .keyboardShortcut("[")
-                .disabled(!state.canGoBack)
-            Button("Forward") { state.goForward() }
-                .keyboardShortcut("]")
-                .disabled(!state.canGoForward)
-            Divider()
-            Button("Quick Open…") { state.palette = state.palette == .files ? nil : .files }
-                .keyboardShortcut("p")
-            Button("Jump to Heading…") { state.palette = state.palette == .headings ? nil : .headings }
-                .keyboardShortcut("j", modifiers: [.command, .shift])
+                .keyboardShortcut("o", modifiers: [.command, .option])
                 .disabled(state.selected == nil)
+                Button("Save") { state.save() }
+                    .keyboardShortcut("s")
+                    .disabled(state.selected?.isDirty != true)
+                Divider()
+                Button("Open Clipboard") { state.openClipboard() }
+                    .keyboardShortcut("v", modifiers: [.command, .shift])
+                Divider()
+                Button("Reopen Closed Tab") { state.reopenClosedTab() }
+                    .keyboardShortcut("t", modifiers: [.command, .shift])
+                    .disabled(state.closedTabs.isEmpty)
+                Menu("Recently Closed") {
+                    ForEach(state.recentlyClosed, id: \.self) { url in
+                        Button(menuTitle(url, among: state.recentlyClosed)) { state.reopen(url) }
+                    }
+                }
+                .disabled(state.closedTabs.isEmpty)
+                Button("Close Tab") { state.closeTabOrWindow() }
+                    .keyboardShortcut("w")
+            }
+
+            CommandGroup(replacing: .saveItem) {
+                Button("Export as PDF…") { state.exportPDF() }
+                    .keyboardShortcut("e")
+                    .disabled(state.selected == nil || state.selected?.editing == true)
+                Button("Export as HTML…") { state.exportHTML() }
+                    .keyboardShortcut("e", modifiers: [.command, .option])
+                    .disabled(state.selected == nil || state.selected?.editing == true)
+            }
+
+            CommandGroup(replacing: .printItem) {
+                Button("Print…") { state.printDocument() }
+                    .keyboardShortcut("p", modifiers: [.command, .shift])
+                    .disabled(state.selected == nil || state.selected?.editing == true)
+            }
+
+            CommandMenu("Go") {
+                Button("Back") { state.goBack() }
+                    .keyboardShortcut("[")
+                    .disabled(!state.canGoBack)
+                Button("Forward") { state.goForward() }
+                    .keyboardShortcut("]")
+                    .disabled(!state.canGoForward)
+                Divider()
+                Button("Quick Open…") { state.palette = state.palette == .files ? nil : .files }
+                    .keyboardShortcut("p")
+                Button("Jump to Heading…") { state.palette = state.palette == .headings ? nil : .headings }
+                    .keyboardShortcut("j", modifiers: [.command, .shift])
+                    .disabled(state.selected == nil)
+            }
         }
 
         CommandMenu("Format") {
