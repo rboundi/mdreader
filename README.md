@@ -53,17 +53,11 @@ brew install --cask rboundi/tap/mdreader
 
 ### Download
 
-Download the `.dmg` from [Releases](https://github.com/rboundi/mdreader/releases), open it and drag MDReader to Applications.
-
-If macOS blocks the app on first launch, go to **System Settings → Privacy & Security** and click **Open Anyway**, or run:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/MDReader.app
-```
+Download the `.dmg` from [Releases](https://github.com/rboundi/mdreader/releases), open it and drag MDReader to Applications. The app is signed and notarized by Apple.
 
 ### Build from source
 
-Requires macOS 13 or later and the Xcode Command Line Tools (`xcode-select --install`).
+Requires macOS 13 or later and the Xcode Command Line Tools (`xcode-select --install`). With full Xcode installed, the build also includes Intel.
 
 ```bash
 git clone https://github.com/rboundi/mdreader.git
@@ -117,7 +111,7 @@ Sources/MDReader/
 Resources/
   web/                    Page template, renderer (app.js), styles, vendored libraries
   mdr                     Command line tool
-scripts/                  Icon generator
+scripts/                  Icon generator, release script
 tests/                    Renderer tests (Node + jsdom)
 ```
 

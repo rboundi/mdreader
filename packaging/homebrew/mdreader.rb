@@ -1,5 +1,5 @@
-# Template for the cask in github.com/rboundi/homebrew-tap (Casks/mdreader.rb).
-# The release workflow fills in version and sha256 automatically.
+# Template for Casks/mdreader.rb in github.com/rboundi/homebrew-tap.
+# scripts/release.sh fills in version and sha256.
 cask "mdreader" do
   version "1.0.0"
   sha256 "0000000000000000000000000000000000000000000000000000000000000000"
@@ -21,9 +21,4 @@ cask "mdreader" do
     "~/Library/Saved Application State/io.github.rboundi.mdreader.savedState",
     "~/Library/WebKit/io.github.rboundi.mdreader",
   ]
-
-  caveats <<~EOS
-    MDReader is not notarized. If macOS refuses to open it, run:
-      xattr -dr com.apple.quarantine #{appdir}/MDReader.app
-  EOS
 end

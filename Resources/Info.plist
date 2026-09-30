@@ -30,6 +30,8 @@
 	<true/>
 	<key>NSSupportsAutomaticTermination</key>
 	<false/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>MDReader needs this to install the mdr command.</string>
 	<key>MDRGitHubRepo</key>
 	<string>rboundi/mdreader</string>
 	<key>NSHumanReadableCopyright</key>

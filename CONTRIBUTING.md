@@ -28,4 +28,16 @@ cd tests && npm install && npm test # renderer tests
 
 ## Releasing
 
-Push a tag such as `git tag v1.1.0 && git push --tags`. The Release workflow builds a universal app, attaches a .dmg and .zip to a GitHub release, and updates the Homebrew cask if `HOMEBREW_TAP_TOKEN` is set.
+Releases are built and notarized on the maintainer's Mac, so no Apple credentials are stored on GitHub:
+
+```bash
+scripts/release.sh 1.1.0
+```
+
+The script checks that `main` is pushed and CI passed, builds a universal app, signs it with the Developer ID certificate, notarizes and staples the app and the .dmg, tags the commit, publishes the GitHub release and updates the Homebrew cask.
+
+It needs, on that Mac:
+- Xcode (for the Intel slice)
+- a **Developer ID Application** certificate in the keychain
+- a notarytool profile named `mdreader-notary`:
+  `xcrun notarytool store-credentials mdreader-notary --key AuthKey_XXXX.p8 --key-id XXXX --issuer <issuer-id>`
