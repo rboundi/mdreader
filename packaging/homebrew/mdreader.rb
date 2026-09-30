@@ -9,7 +9,7 @@ cask "mdreader" do
   desc "Lightweight Markdown reader with tabs, dark mode and PDF export"
   homepage "https://github.com/rboundi/mdreader"
 
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "MDReader.app"
   binary "#{appdir}/MDReader.app/Contents/Resources/mdr"
