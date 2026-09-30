@@ -29,10 +29,16 @@ struct TabBar: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    /// When two tabs share a filename, show the parent folder so they can be told apart.
+    /// When two tabs share a name, show the parent folder (or the file name, for two front matter
+    /// titles in one folder) so they can be told apart.
     private func disambiguation(for tab: DocTab) -> String? {
-        let clash = state.tabs.contains { $0.id != tab.id && $0.title == tab.title }
-        return clash ? tab.url.deletingLastPathComponent().lastPathComponent : nil
+        let folder = tab.url.deletingLastPathComponent()
+        let clashes = state.tabs.filter { $0.id != tab.id && $0.title == tab.title }
+        guard !clashes.isEmpty else { return nil }
+        if tab.frontMatterTitle != nil, clashes.contains(where: { $0.url.deletingLastPathComponent() == folder }) {
+            return tab.fileName
+        }
+        return folder.lastPathComponent
     }
 }
 

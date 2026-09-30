@@ -141,21 +141,37 @@ struct ContentView: View {
 
     private var showingSource: Bool { state.selected?.showSource ?? false }
 
+    private static func modifiedText(_ date: Date) -> String {
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) { return "Modified \(date.formatted(date: .omitted, time: .shortened))" }
+        if calendar.isDateInYesterday(date) { return "Modified yesterday" }
+        let thisYear = calendar.isDate(date, equalTo: Date(), toGranularity: .year)
+        return "Modified " + date.formatted(thisYear ? .dateTime.day().month() : .dateTime.day().month().year())
+    }
+
     private var subtitle: String {
         guard let tab = state.selected else { return "" }
         let folder = (tab.url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath
         if tab.showSource { return "\(folder) — Markdown" }
-        guard tab.error == nil, tab.wordCount > 0 else { return folder }
-        let words = tab.wordCount.formatted()
-        let minutes = max(1, Int((Double(tab.wordCount) / 230).rounded()))
-        return "\(folder) · \(words) words · \(minutes) min read"
+        guard tab.error == nil else { return folder }
+        var parts = [folder]
+        if tab.wordCount > 0 {
+            let minutes = max(1, Int((Double(tab.wordCount) / 230).rounded()))
+            parts += ["\(tab.wordCount.formatted()) words", "\(minutes) min read"]
+        }
+        if tab.tasks.total > 0 { parts.append("\(tab.tasks.done) of \(tab.tasks.total) tasks done") }
+        if let modified = tab.modified { parts.append(Self.modifiedText(modified)) }
+        return parts.joined(separator: " · ")
     }
 }
 
 /// Hosts the long-lived web view owned by `ReaderController`.
 struct WebViewHost: NSViewRepresentable {
     let webView: ReaderWebView
-    func makeNSView(context: Context) -> ReaderWebView { webView }
+    func makeNSView(context: Context) -> ReaderWebView {
+        DispatchQueue.main.async { AppState.shared.focusReader() }
+        return webView
+    }
     func updateNSView(_ nsView: ReaderWebView, context: Context) {}
 }
 
@@ -260,7 +276,7 @@ struct FindBar: View {
         }
         .onChange(of: state.renderGeneration) { _ in
             // The page was re-rendered (tab switch, reload, source toggle); search the new content.
-            state.reader.find(query) { c, t in current = c; total = t }
+            state.reader.find(query, scroll: false) { c, t in current = c; total = t }
         }
     }
 
@@ -271,6 +287,7 @@ struct FindBar: View {
     private func close() {
         state.reader.clearFind()
         state.findVisible = false
+        DispatchQueue.main.async { state.focusReader() }
     }
 }
 

@@ -59,17 +59,25 @@
     return n ? `${slug}-${n}` : slug;
   }
 
+  // A heading's id without the de-duplication suffix, for links written by hand.
+  const plainSlug = (text) => slugify(text, new Map());
+
   function splitFrontMatter(md) {
     const m = md.match(/^---[ \t]*\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/);
     return m ? [m[1], md.slice(m[0].length)] : [null, md];
   }
 
-  function scrollToAnchor(id, smooth) {
-    if (!id) return false;
+  function anchorTarget(id) {
     let target = document.getElementById(id) || document.getElementsByName(id)[0];
     if (!target) {
       try { target = document.getElementById(decodeURIComponent(id)); } catch (_) {}
     }
+    return target || null;
+  }
+
+  function scrollToAnchor(id, smooth) {
+    if (!id) return false;
+    const target = anchorTarget(id);
     if (target) reveal(target);
     target?.scrollIntoView?.({ behavior: smooth ? "smooth" : "auto", block: "start" });
     return !!target;
@@ -108,7 +116,56 @@
     ],
   };
 
-  marked.use({ gfm: true }, markedFootnote({ description: "Footnotes" }), math);
+  // [[Note]], [[Note|label]], [[Note#Heading]] and [[#Heading]] link to Note.md next to the document;
+  // ![[image.png]] shows the image.
+  const FILE_EXTENSION = /\.(md|markdown|mdown|mkdn?|mdwn|txt|text|png|jpe?g|gif|webp|avif|heic|svg|bmp|tiff?|pdf|csv|json|html?|mp[34]|m4a|mov|wav)$/i;
+  const IMAGE_EXTENSION = /\.(png|jpe?g|gif|webp|avif|heic|svg|bmp|tiff?)$/i;
+  const wikiLinks = {
+    extensions: [{
+      name: "wikiLink",
+      level: "inline",
+      start(src) {
+        const i = src.indexOf("[[");
+        if (i < 0) return undefined;
+        return i > 0 && src[i - 1] === "!" ? i - 1 : i;
+      },
+      tokenizer(src) {
+        if (this.lexer.state.inLink) return;
+        // Not followed by "(" or "[", so citation-style links like [[1]](url) keep working.
+        const m = /^(!?)\[\[([^[\]|\n]+?)(?:\|([^[\]\n]+?))?\]\](?![([])/.exec(src);
+        if (!m || !m[2].replace(/#/g, "").trim()) return;
+        return { type: "wikiLink", raw: m[0], embed: !!m[1], target: m[2].trim(), label: m[3]?.trim() };
+      },
+      renderer(t) {
+        const hash = t.target.indexOf("#");
+        const name = hash < 0 ? t.target : t.target.slice(0, hash).trim();
+        const heading = hash < 0 ? "" : t.target.slice(hash + 1).trim();
+        let href = name.split("/").map(encodeURIComponent).join("/");
+        if (t.embed && IMAGE_EXTENSION.test(name)) {
+          return `<img src="${escapeHTML(href)}" alt="${escapeHTML(t.label || name)}">`;
+        }
+        if (name && !FILE_EXTENSION.test(name)) href += ".md";
+        if (heading) href += "#" + encodeURIComponent(plainSlug(heading));
+        const label = t.label || (name && heading ? `${name} › ${heading}` : name || heading);
+        return `${t.embed ? "!" : ""}<a class="wikilink" href="${escapeHTML(href)}">${escapeHTML(label)}</a>`;
+      },
+    }],
+  };
+
+  // An image alone in its paragraph becomes a figure captioned with its title or alt text.
+  const captions = {
+    renderer: {
+      paragraph(token) {
+        const t = token.tokens;
+        if (t?.length !== 1 || t[0].type !== "image") return false;
+        const caption = (t[0].title || t[0].text || "").trim();
+        if (!caption) return false;
+        return `<figure>${this.parser.parseInline(t)}<figcaption>${escapeHTML(caption)}</figcaption></figure>\n`;
+      },
+    },
+  };
+
+  marked.use({ gfm: true }, markedFootnote({ description: "Footnotes" }), math, wikiLinks, captions);
   // For locating headings in the source. Kept separate because lexing with the footnote extension
   // outside marked.parse leaves it in a broken state for the next document.
   const placeLexer = new marked.Marked({ gfm: true }, math);
@@ -302,9 +359,29 @@
       : [];
   }
 
+  // Optional 1, 1.1, 1.2 numbering of the outline headings. A lone h1 at the top is the
+  // document's title and isn't numbered.
+  function numberHeadings() {
+    const hs = headings();
+    hs.forEach((h) => h.removeAttribute("data-num"));
+    if (!options.numbers) return;
+    const h1s = hs.filter((h) => h.tagName === "H1");
+    const list = h1s.length === 1 && hs[0] === h1s[0] ? hs.slice(1) : hs;
+    if (!list.length) return;
+    const base = Math.min(...list.map(headingLevel));
+    const counters = [];
+    for (const h of list) {
+      const depth = headingLevel(h) - base;
+      counters[depth] = (counters[depth] || 0) + 1;
+      counters.length = depth + 1;
+      h.dataset.num = Array.from(counters, (n) => n || 1).join(".");
+    }
+  }
+
   function sendOutline() {
     const items = headings().map((h) => ({
-      id: h.id, level: Number(h.tagName[1]), text: h.textContent.trim(),
+      id: h.id, level: Number(h.tagName[1]),
+      text: (h.dataset.num ? h.dataset.num + " " : "") + h.textContent.trim(),
     }));
     activeHeading = null;
     post({ type: "outline", items });
@@ -346,8 +423,13 @@
   async function render(p) {
     const token = ++renderToken;
     // Switching between rendered and source view of the same document keeps the reader's place.
-    const docKey = p.base + "|" + p.title;
+    const docKey = p.path || p.base + "|" + p.title;
     const sync = p.sync && current.doc === docKey && current.source !== !!p.source ? readPlace() : null;
+    // The file changed on disk while showing: remember what it looked like to find the edit.
+    sourceStops = null;
+    const reloaded = p.scroll < 0 && current.doc === docKey && current.source === !!p.source
+      && current.md !== (p.md || "");
+    const before = reloaded ? { md: current.md, blocks: current.blocks } : null;
     clearFind();
     closeLightbox();
     hideFootnote();
@@ -363,6 +445,7 @@
     setBase(p.base);
     document.title = p.title || "";
 
+    let blocks = null;
     if (p.error) {
       content.className = "markdown-body";
       const div = document.createElement("div");
@@ -383,17 +466,23 @@
     } else {
       content.className = "markdown-body";
       content.replaceChildren(renderMarkdown(p.md));
+      numberHeadings();
+      blocks = blockSnapshot();
       if (keepFolds.length) {
         keepFolds.forEach((id) => document.getElementById(id)?.classList.add("collapsed"));
         applyFolds();
       }
     }
-    current = { doc: docKey, source: !!p.source, md: p.md || "" };
+    current = { doc: docKey, source: !!p.source, md: p.md || "", blocks };
     checkHorizontalScroll();
     sendOutline();
     updateProgress();
+    checkLinks(token);
+    const edit = before && options.followEdits ? findEdit(before) : null;
+    let flash = true;
     const reposition = () => {
       if (sync) applyPlace(sync);
+      else if (edit) { showEdit(edit, flash); flash = false; }
       else if (!(p.anchor && scrollToAnchor(p.anchor))) restoreScroll(p.scroll);
     };
     reposition();
@@ -413,6 +502,83 @@
     reposition();
     updateActive();
     updateProgress();
+  }
+
+  // ---------- following edits ----------
+
+  // Top-level blocks as HTML, before math and diagrams are drawn, to compare with the next version.
+  function blockSnapshot() {
+    if (!options.followEdits || !content.classList.contains("markdown-body")) return null;
+    // Front matter is left out: tools that stamp an "updated:" date on every save would otherwise
+    // make every edit look like it's at the top.
+    return [...content.children].map((el) => (el.classList.contains("front-matter") ? "" : el.outerHTML));
+  }
+
+  // The first block (rendered view) or character (source view) that differs from `before`.
+  function findEdit(before) {
+    if (current.source) {
+      const a = before.md, b = current.md;
+      let i = 0;
+      while (i < a.length && i < b.length && a[i] === b[i]) i++;
+      return { offset: i };
+    }
+    if (!before.blocks || !current.blocks) return null;
+    const a = before.blocks, b = current.blocks;
+    let i = 0;
+    while (i < a.length && i < b.length && a[i] === b[i]) i++;
+    if (i === a.length && i === b.length) return null;
+    return { block: Math.min(i, b.length - 1) };
+  }
+
+  // Scrolls the edit into view if it isn't already, and highlights it briefly.
+  function showEdit(edit, flash) {
+    if (edit.offset !== undefined) {
+      const y = sourceOffsetY(edit.offset);
+      if (y !== null && (y < window.scrollY || y > window.scrollY + window.innerHeight - 40)) {
+        window.scrollTo(0, Math.max(0, y - window.innerHeight / 3));
+      }
+      return;
+    }
+    // Sections the reader collapsed stay collapsed.
+    const el = content.children[edit.block];
+    if (!el || el.classList.contains("folded-away")) return;
+    const r = el.getBoundingClientRect();
+    if (r.top < 0 || r.top > window.innerHeight - 40) {
+      window.scrollTo(0, Math.max(0, r.top + window.scrollY - window.innerHeight / 3));
+    }
+    if (flash) {
+      el.classList.remove("just-edited");
+      void el.offsetWidth;
+      el.classList.add("just-edited");
+      setTimeout(() => el.classList.remove("just-edited"), 1600);
+    }
+  }
+
+  // ---------- broken links ----------
+
+  const fileOf = (a) => a.href.replace(/[?#].*$/, "");
+
+  // In-page anchors are checked here; the app checks that linked local files exist.
+  function checkLinks(token) {
+    if (!content.classList.contains("markdown-body")) return;
+    const files = new Set();
+    for (const a of content.querySelectorAll("a[href]")) {
+      const href = a.getAttribute("href");
+      if (href.startsWith("#")) {
+        if (href.length > 1 && !anchorTarget(href.slice(1))) a.classList.add("broken");
+      } else if (a.protocol === "file:") {
+        files.add(fileOf(a));
+      }
+    }
+    if (files.size) post({ type: "links", token, files: [...files].slice(0, 2000) });
+  }
+
+  function markBroken(token, missing) {
+    if (token !== renderToken || !missing.length) return;
+    const set = new Set(missing);
+    for (const a of content.querySelectorAll("a[href]")) {
+      if (a.protocol === "file:" && set.has(fileOf(a))) a.classList.add("broken");
+    }
   }
 
   function imagesLoaded(images, timeout) {
@@ -474,7 +640,8 @@
     el.scrollIntoView?.({ block: "center" });
   }
 
-  function find(query) {
+  // `scroll` is false when searching again after the page re-rendered, so the reader stays put.
+  function find(query, scroll = true) {
     clearFind();
     if (!query) return status();
     const needle = query.toLowerCase();
@@ -504,7 +671,8 @@
     }
     if (found.marks.length) {
       found.index = 0;
-      focusMatch();
+      if (scroll) focusMatch();
+      else found.marks[0].classList.add("current");
     }
     return status();
   }
@@ -526,6 +694,7 @@
     clone.querySelectorAll(".copy-btn, .fold, .front-matter").forEach((el) => el.remove());
     clone.querySelectorAll(".folded-away, .collapsed").forEach((el) => el.classList.remove("folded-away", "collapsed"));
     clone.querySelectorAll("mark.mdr-find").forEach((m) => m.replaceWith(m.textContent));
+    clone.querySelectorAll(".broken, .just-edited").forEach((el) => el.classList.remove("broken", "just-edited"));
     const images = [];
     const live = content.querySelectorAll("img[src]");
     clone.querySelectorAll("img[src]").forEach((img, i) => {
@@ -649,13 +818,53 @@
     post({ type: "lightbox", open: false });
   }
 
+  // ---------- keyboard reading ----------
+
+  // Where each heading starts, for n and p.
+  let sourceStops = null;
+
+  function headingStops() {
+    if (current.source) {
+      sourceStops ??= sourceOffsetsY(headingOffsets(current.md)).map((y) => y - 12);
+      return sourceStops;
+    }
+    // Headings with no layout box (collapsed sections, closed <details>) are skipped.
+    return headings().filter((h) => h.getClientRects().length > 0)
+      .map((h) => h.getBoundingClientRect().top + window.scrollY - 12);
+  }
+
+  function readingKey(e) {
+    if (e.metaKey || e.ctrlKey || e.altKey || e.isComposing || !content.firstElementChild) return false;
+    if (e.target.closest?.("input, textarea, select, [contenteditable]")) return false;
+    const y = window.scrollY;
+    switch (e.key) {
+      case "j": window.scrollBy({ top: 64, behavior: e.repeat ? "auto" : "smooth" }); break;
+      case "k": window.scrollBy({ top: -64, behavior: e.repeat ? "auto" : "smooth" }); break;
+      case "g": window.scrollTo(0, 0); break;
+      case "G": window.scrollTo(0, document.documentElement.scrollHeight); break;
+      case "n": {
+        const next = headingStops().find((s) => s > y + 1);
+        if (next !== undefined) window.scrollTo(0, next);
+        break;
+      }
+      case "p": {
+        const prev = headingStops().filter((s) => s < y - 1).pop();
+        window.scrollTo(0, prev ?? 0);
+        break;
+      }
+      default: return false;
+    }
+    return true;
+  }
+
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeLightbox();
+    else if (!document.querySelector(".lightbox") && readingKey(e)) e.preventDefault();
   });
 
   // ---------- keeping your place between rendered and source view ----------
 
-  let current = { doc: null, source: false, md: "" };
+  let current = { doc: null, source: false, md: "", blocks: null };
 
   const topHeadings = () => [...content.children].filter((el) => headingLevel(el));
 
@@ -732,6 +941,26 @@
       offset += node.nodeValue.length;
     }
     return null;
+  }
+
+  // Page positions of several ascending character offsets, in one pass over the text.
+  function sourceOffsetsY(offsets) {
+    const ys = [];
+    let offset = 0;
+    let i = 0;
+    for (const node of sourceTextNodes()) {
+      const len = node.nodeValue.length;
+      while (i < offsets.length && offsets[i] < offset + len) {
+        const range = document.createRange();
+        range.setStart(node, offsets[i] - offset);
+        range.collapse(true);
+        const rect = range.getClientRects()[0] || range.getBoundingClientRect();
+        if (rect) ys.push(rect.top + window.scrollY);
+        i++;
+      }
+      offset += len;
+    }
+    return ys;
   }
 
   function sourceOffsetY(target) {
@@ -816,8 +1045,29 @@
 
   // ---------- events ----------
 
+  const options = { numbers: false, followEdits: true };
+
   function setOptions(o) {
     if (o.font) document.body.dataset.font = o.font;
+    if (o.wrap !== undefined) document.body.classList.toggle("wrap-code", !!o.wrap);
+    if (o.followEdits !== undefined) options.followEdits = !!o.followEdits;
+    if (o.numbers !== undefined && !!o.numbers !== options.numbers) {
+      options.numbers = !!o.numbers;
+      if (content.classList.contains("markdown-body")) {
+        numberHeadings();
+        current.blocks = null;
+        sendOutline();
+      }
+    }
+    if (o.css !== undefined) {
+      let style = document.getElementById("user-css");
+      if (!style) {
+        style = document.createElement("style");
+        style.id = "user-css";
+        document.head.append(style);
+      }
+      style.textContent = o.css;
+    }
     if (o.theme !== undefined) {
       if (o.theme) document.documentElement.dataset.theme = o.theme;
       else delete document.documentElement.dataset.theme;
@@ -883,7 +1133,10 @@
     if (content.querySelector(".mermaid-block")) renderDiagrams(content);
   });
 
-  window.addEventListener("resize", updateProgress);
+  window.addEventListener("resize", () => {
+    sourceStops = null;
+    updateProgress();
+  });
 
   document.addEventListener("DOMContentLoaded", () => {
     content = document.getElementById("content");
@@ -895,7 +1148,7 @@
 
   window.mdr = {
     render: (p) => (lastRender = render(p).catch(() => {})),
-    setOptions, find, findStep, clearFind, exportHTML, preparePrint, afterPrint,
+    setOptions, find, findStep, clearFind, exportHTML, preparePrint, afterPrint, markBroken,
     scrollToAnchor: (id) => scrollToAnchor(id, true),
     scrollTo: (y) => window.scrollTo(0, y),
     scrollY: () => window.scrollY,

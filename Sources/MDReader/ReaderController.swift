@@ -26,7 +26,13 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
     private var appliedFont: ReadingFont?
     private var appliedWidth: ContentWidth?
     private var appliedTheme: String?
+    private var appliedFlags: [Bool]?
+    private var appliedCSS: String?
+    private var customCSS = CustomCSS.read()
+    private var cssWatcher: FileWatcher?
     private var printCompletion: ((Bool) -> Void)?
+    /// Title for printed and exported copies of the current document.
+    private var documentName = ""
 
     override init() {
         let config = WKWebViewConfiguration()
@@ -43,10 +49,23 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
         webView.pageZoom = Prefs.zoomLevel
 
         loadTemplate()
+        watchCustomCSS()
 
         NotificationCenter.default.addObserver(
             self, selector: #selector(preferencesChanged),
             name: UserDefaults.didChangeNotification, object: nil)
+    }
+
+    /// Picks up changes to custom.css. Does nothing until the file exists.
+    func watchCustomCSS() {
+        let url = CustomCSS.url
+        guard cssWatcher?.isWatching != true, FileManager.default.fileExists(atPath: url.path) else { return }
+        cssWatcher = FileWatcher(url: url) { [weak self] in
+            self?.customCSS = CustomCSS.read()
+            self?.applyOptions()
+        }
+        customCSS = CustomCSS.read()
+        applyOptions()
     }
 
     private func loadTemplate() {
@@ -78,7 +97,9 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
         tab.pendingAnchor = nil
         let sync = tab.syncOnNextDisplay
         tab.syncOnNextDisplay = false
+        documentName = tab.documentName
         send([
+            "path": tab.url.path,
             "sync": sync,
             "anchor": anchor,
             "md": tab.text,
@@ -127,14 +148,23 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
         let font = Prefs.font
         let width = Prefs.width
         let theme = Prefs.appearanceMode == .sepia ? "sepia" : ""
-        if ready, font != appliedFont || width != appliedWidth || theme != appliedTheme {
+        let defaults = UserDefaults.standard
+        let flags = [Prefs.wrapCode, Prefs.numberHeadings, Prefs.followEdits].map(defaults.bool(forKey:))
+        if ready,
+            font != appliedFont || width != appliedWidth || theme != appliedTheme || flags != appliedFlags
+                || customCSS != appliedCSS
+        {
             appliedFont = font
             appliedWidth = width
             appliedTheme = theme
+            appliedFlags = flags
+            appliedCSS = customCSS
+            let options: [String: Any] = [
+                "font": font.rawValue, "width": width.pixels, "theme": theme,
+                "wrap": flags[0], "numbers": flags[1], "followEdits": flags[2], "css": customCSS,
+            ]
             webView.callAsyncJavaScript(
-                "window.mdr.setOptions(o)",
-                arguments: ["o": ["font": font.rawValue, "width": width.pixels, "theme": theme]], in: nil,
-                in: .page, completionHandler: nil)
+                "window.mdr.setOptions(o)", arguments: ["o": options], in: nil, in: .page, completionHandler: nil)
         }
         if abs(webView.pageZoom - Prefs.zoomLevel) > 0.001 {
             webView.pageZoom = Prefs.zoomLevel
@@ -149,8 +179,9 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
 
     // MARK: Find
 
-    func find(_ query: String, completion: @escaping (Int, Int) -> Void) {
-        callFind("window.mdr.find(q)", ["q": query], completion)
+    /// `scroll` false keeps the reader where it is (searching again after the page re-rendered).
+    func find(_ query: String, scroll: Bool = true, completion: @escaping (Int, Int) -> Void) {
+        callFind("window.mdr.find(q, s)", ["q": query, "s": scroll], completion)
     }
 
     func findStep(_ direction: Int, completion: @escaping (Int, Int) -> Void) {
@@ -220,8 +251,8 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
         op.showsPrintPanel = showPanel
         op.showsProgressPanel = false
         // Shown in the PDF header: the document's name, not the (possibly de-duplicated) file name.
-        let title = ((webView.title ?? "") as NSString).deletingPathExtension
-        op.jobTitle = title.isEmpty ? (url?.deletingPathExtension().lastPathComponent ?? "Document") : title
+        op.jobTitle = documentName.isEmpty
+            ? (url?.deletingPathExtension().lastPathComponent ?? "Document") : documentName
         // WKWebView's print view needs a real frame, otherwise pages come out blank.
         op.view?.frame = webView.bounds
         // Printing lays the page out again and leaves it scrolled; put the reader back afterwards.
@@ -271,6 +302,8 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
         appliedFont = nil
         appliedWidth = nil
         appliedTheme = nil
+        appliedFlags = nil
+        appliedCSS = nil
         applyOptions()
         if let payload = pendingRender {
             pendingRender = nil
@@ -339,6 +372,10 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
             lightboxOpen = (body["open"] as? Bool) ?? false
         case "context":
             webView.contextHeading = body["heading"] as? String ?? ""
+        case "links":
+            if let token = body["token"] as? NSNumber, let files = body["files"] as? [String] {
+                checkLinks(files, token: token.intValue)
+            }
         case "copy":
             if let text = body["text"] as? String {
                 NSPasteboard.general.clearContents()
@@ -346,6 +383,22 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
             }
         default:
             break
+        }
+    }
+
+    /// Tells the page which of its links to local files point at nothing.
+    private func checkLinks(_ files: [String], token: Int) {
+        Task {
+            let missing = await Task.detached(priority: .userInitiated) {
+                files.filter { href in
+                    guard let url = URL(string: href), url.isFileURL else { return false }
+                    return !FileManager.default.fileExists(atPath: url.path)
+                }
+            }.value
+            guard !missing.isEmpty else { return }
+            webView.callAsyncJavaScript(
+                "window.mdr.markBroken(t, m)", arguments: ["t": token, "m": missing], in: nil, in: .page,
+                completionHandler: nil)
         }
     }
 

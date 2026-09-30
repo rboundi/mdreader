@@ -174,6 +174,16 @@ body[data-font="serif"] .markdown-body :is(h1, h2, h3, h4, h5, h6) { font-family
 
 .markdown-body a { color: var(--link); text-decoration: none; }
 .markdown-body a:hover { text-decoration: underline; }
+/* Links to files or headings that don't exist. */
+.markdown-body a.broken { color: var(--muted); text-decoration: line-through; }
+
+.markdown-body [data-num]::before { content: attr(data-num); margin-right: 0.45em; color: var(--muted); font-weight: 500; }
+
+.markdown-body .just-edited { animation: just-edited 1.6s ease-out; }
+@keyframes just-edited {
+  from { background: var(--mark); }
+  to { background: transparent; }
+}
 
 .markdown-body strong { font-weight: 650; }
 
@@ -202,6 +212,9 @@ body[data-font="serif"] .markdown-body :is(h1, h2, h3, h4, h5, h6) { font-family
 
 .markdown-body img { max-width: 100%; height: auto; border-radius: 4px; }
 .markdown-body p[align="center"] img, .markdown-body div[align="center"] img { display: inline-block; }
+.markdown-body figure { margin: 0 0 1em; text-align: center; }
+.markdown-body figure img { display: block; margin: 0 auto; }
+.markdown-body figcaption { margin-top: 0.4em; font-size: 0.88em; color: var(--muted); }
 
 .markdown-body kbd {
   display: inline-block;
@@ -241,6 +254,7 @@ code, pre { font-family: var(--font-mono); }
   border-radius: 8px;
 }
 .markdown-body pre code { background: none; padding: 0; font-size: inherit; }
+body.wrap-code .markdown-body pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .copy-btn {
   position: absolute;
@@ -405,6 +419,7 @@ mark.mdr-find.current { background: var(--mark-current); color: #000; }
   .markdown-body pre, .source-view pre { white-space: pre-wrap; word-wrap: break-word; overflow: visible; }
   .markdown-body .table-wrap { overflow: visible; }
   .markdown-body :is(h1, h2, h3, h4, h5, h6) { break-after: avoid; }
-  .markdown-body :is(pre, blockquote, tr, img, .alert, .mermaid-block, .math-display) { break-inside: avoid; }
+  .markdown-body :is(pre, blockquote, tr, img, figure, .alert, .mermaid-block, .math-display) { break-inside: avoid; }
+  .markdown-body a.broken { color: inherit; text-decoration: none; }
   .markdown-body .math-display, .markdown-body .mermaid-block { overflow: visible; }
 }

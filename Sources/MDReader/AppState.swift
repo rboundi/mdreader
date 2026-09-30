@@ -20,7 +20,10 @@ final class AppState: ObservableObject {
         didSet {
             guard selectedID != oldValue else { return }
             // While restoring, only the finally selected tab is rendered (see restoreTabs).
-            if !restoring { reader.display(selected) }
+            if !restoring {
+                reader.display(selected)
+                focusReader()
+            }
             persistTabs()
             refreshFolder()
         }
@@ -212,6 +215,50 @@ final class AppState: ObservableObject {
         tabs[(index + 1)...].forEach { close($0.id) }
     }
 
+    /// The last ten closed tabs, most recent first.
+    var recentlyClosed: [URL] { Array(closedTabs.suffix(10).reversed()) }
+
+    func reopen(_ url: URL) {
+        closedTabs.removeAll { $0 == url }
+        open([url])
+    }
+
+    /// ⇧⌘V: opens copied Markdown text in a new tab, or copied files.
+    func openClipboard() {
+        let pb = NSPasteboard.general
+        if let files = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+            !files.isEmpty
+        {
+            return open(files)
+        }
+        guard let text = pb.string(forType: .string), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return show(Toast(message: "The clipboard has no text")) }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("MDReader", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        var url = folder.appendingPathComponent("Clipboard.md")
+        var n = 2
+        while FileManager.default.fileExists(atPath: url.path) {
+            url = folder.appendingPathComponent("Clipboard \(n).md")
+            n += 1
+        }
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            open([url], remember: false, scroll: 0)
+        } catch {
+            show(Toast(message: "Couldn't open the clipboard: \(error.localizedDescription)"))
+        }
+    }
+
+    /// Clears out clipboard files from earlier sessions that aren't open in a tab.
+    func removeOldClipboardFiles() {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("MDReader", isDirectory: true)
+        let open = Set(tabs.map(\.url.path))
+        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        for file in files where !open.contains(file.standardizedFileURL.path) {
+            try? FileManager.default.removeItem(at: file)
+        }
+    }
+
     /// ⇧⌘T: bring back the most recently closed tab that still exists on disk.
     func reopenClosedTab() {
         while let url = closedTabs.popLast() {
@@ -302,6 +349,17 @@ final class AppState: ObservableObject {
         UserDefaults.standard.set(app.path, forKey: Prefs.editorApp)
         objectWillChange.send()
         return app
+    }
+
+    /// Gives the page keyboard focus (for j/k and the other reading keys) unless something else has it.
+    func focusReader() {
+        guard let window = reader.webView.window, palette == nil else { return }
+        // A text field that has gone away can leave its field editor as first responder.
+        let editor = window.firstResponder as? NSTextView
+        let orphanedEditor = editor?.isFieldEditor == true && (editor?.delegate as? NSView)?.window == nil
+        if window.firstResponder == nil || window.firstResponder === window || orphanedEditor {
+            window.makeFirstResponder(reader.webView)
+        }
     }
 
     func toggleFocusMode() {

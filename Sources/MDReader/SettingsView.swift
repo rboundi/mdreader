@@ -11,6 +11,9 @@ struct SettingsView: View {
     @AppStorage(Prefs.printHeaderFooter) private var printHeaderFooter = true
     @AppStorage(Prefs.checkForUpdates) private var checkForUpdates = true
     @AppStorage(Prefs.editorApp) private var editorPath = ""
+    @AppStorage(Prefs.numberHeadings) private var numberHeadings = false
+    @AppStorage(Prefs.wrapCode) private var wrapCode = false
+    @AppStorage(Prefs.followEdits) private var followEdits = true
 
     private var editorName: String? {
         editorPath.isEmpty ? nil
@@ -38,6 +41,13 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                     Stepper("", value: $zoom, in: 0.5...3.0, step: 0.1).labelsHidden()
                 }
+                Toggle("Number headings", isOn: $numberHeadings)
+                Toggle("Wrap long lines in code blocks", isOn: $wrapCode)
+                HStack {
+                    Text("Custom CSS")
+                    Spacer()
+                    Button("Edit…") { CustomCSS.edit() }
+                }
             }
             Section("PDF Export") {
                 HStack {
@@ -54,6 +64,7 @@ struct SettingsView: View {
             }
             Section("Tabs") {
                 Toggle("Reopen tabs from last session", isOn: $restoreTabs)
+                Toggle("Scroll to edits when a file changes", isOn: $followEdits)
             }
             Section("Other") {
                 HStack {

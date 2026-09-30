@@ -14,7 +14,10 @@
 
 **Reading**
 - GitHub-flavored Markdown: tables, task lists, strikethrough, footnotes, alerts (`> [!NOTE]`), heading anchors, relative images and YAML front matter
-- Syntax-highlighted code blocks with a copy button
+- Wiki links: `[[Note]]`, `[[Note|label]]` and `[[Note#Heading]]` open `Note.md` from the same folder
+- An image on its own line gets its alt text as a caption
+- Links to missing files or headings are struck through
+- Syntax-highlighted code blocks with a copy button, optionally wrapping long lines
 - Math with `$inline$`, `$$display$$` or ```` ```math ```` blocks (KaTeX)
 - Diagrams from ```` ```mermaid ```` blocks: flowchart, sequence, class, state, ER, Gantt, pie and more
 - Rendered or Markdown source view (<kbd>⌘</kbd><kbd>/</kbd>), staying at the same section
@@ -22,17 +25,20 @@
 - Footnotes show on hover
 - Sidebar with the document outline or the other Markdown files in the folder
 - Collapsible sections, image zoom and a reading progress bar
+- Optional heading numbers (1, 1.1, 1.2) in the document and the outline
+- Keyboard reading: <kbd>j</kbd> / <kbd>k</kbd> to scroll, <kbd>n</kbd> / <kbd>p</kbd> for the next or previous heading, <kbd>g</kbd> / <kbd>G</kbd> for the top or bottom
 - Back and Forward after following links, also with a two-finger swipe or the mouse side buttons
 - Jump to Heading (<kbd>⇧</kbd><kbd>⌘</kbd><kbd>J</kbd>)
 - Reopens each file where you left off
-- Word count and reading time
-- Live reload when the file changes on disk
+- Word count, reading time, tasks done and last modified date in the title bar
+- The front matter `title:` is used as the tab and window title
+- Live reload when the file changes on disk, scrolling to the part that changed
 - Find in page
 
 **Tabs**
 - Drag to reorder, right-click to close others or reveal in Finder
 - Quick Open (<kbd>⌘</kbd><kbd>P</kbd>) for open tabs, recent files and files in the same folder
-- Reopen closed tabs with <kbd>⇧</kbd><kbd>⌘</kbd><kbd>T</kbd>
+- Reopen closed tabs with <kbd>⇧</kbd><kbd>⌘</kbd><kbd>T</kbd> or from **File → Recently Closed**
 - Tabs are restored on relaunch
 - Links to other Markdown files open in a new tab, including `guide.md#setup`
 - Right-click a heading to copy a link to it
@@ -45,13 +51,15 @@
 **Appearance**
 - Light, Sepia, Dark or System theme
 - Sans or serif font, text size and text width
+- Your own styles in `~/Library/Application Support/MDReader/custom.css` (**Settings → Custom CSS → Edit…**)
 
 **Other**
 - Edit in your editor of choice (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>O</kbd>); changes show as soon as you save
 - Share button for Mail, Messages and AirDrop
 - Open a folder to read its README with the other files in the sidebar
 - `mdr` command: `mdr README.md`, `mdr docs` or `cat notes.md | mdr`
-- Open files by drag and drop, Finder's Open With, or Open Recent
+- Open files by drag and drop, Finder's Open With, Open Recent or the Dock menu
+- Open copied Markdown text in a new tab (<kbd>⇧</kbd><kbd>⌘</kbd><kbd>V</kbd>)
 - Weekly check for new versions on GitHub (can be turned off)
 
 ## Install
@@ -88,6 +96,7 @@ Select a `.md` file in Finder, press <kbd>⌘</kbd><kbd>I</kbd>, choose MDReader
 |---|---|
 | Open | <kbd>⌘</kbd><kbd>O</kbd> |
 | Quick Open | <kbd>⌘</kbd><kbd>P</kbd> |
+| Open Clipboard | <kbd>⇧</kbd><kbd>⌘</kbd><kbd>V</kbd> |
 | Back / Forward | <kbd>⌘</kbd><kbd>[</kbd> / <kbd>⌘</kbd><kbd>]</kbd> |
 | Jump to Heading | <kbd>⇧</kbd><kbd>⌘</kbd><kbd>J</kbd> |
 | Edit in editor | <kbd>⌥</kbd><kbd>⌘</kbd><kbd>O</kbd> |
@@ -100,6 +109,9 @@ Select a `.md` file in Finder, press <kbd>⌘</kbd><kbd>I</kbd>, choose MDReader
 | Export as PDF / HTML | <kbd>⌘</kbd><kbd>E</kbd> / <kbd>⌥</kbd><kbd>⌘</kbd><kbd>E</kbd> |
 | Copy as Rich Text | <kbd>⌥</kbd><kbd>⌘</kbd><kbd>C</kbd> |
 | Print | <kbd>⇧</kbd><kbd>⌘</kbd><kbd>P</kbd> |
+| Scroll down / up | <kbd>j</kbd> / <kbd>k</kbd> |
+| Next / previous heading | <kbd>n</kbd> / <kbd>p</kbd> |
+| Top / bottom | <kbd>g</kbd> / <kbd>G</kbd> |
 | Find / next / previous | <kbd>⌘</kbd><kbd>F</kbd> / <kbd>⌘</kbd><kbd>G</kbd> / <kbd>⇧</kbd><kbd>⌘</kbd><kbd>G</kbd> |
 | Reload from disk | <kbd>⌘</kbd><kbd>R</kbd> |
 | Zoom in / out / actual size | <kbd>⌘</kbd><kbd>+</kbd> / <kbd>⌘</kbd><kbd>-</kbd> / <kbd>⌘</kbd><kbd>0</kbd> |

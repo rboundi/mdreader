@@ -311,3 +311,87 @@ test("the zoomed image and footnote preview close when another document renders"
   render("# Other", { title: "other.md" });
   assert.equal(window.document.querySelector(".footnote-tip"), null);
 });
+
+test("an image alone in a paragraph gets a caption; inline and linked images don't", () => {
+  const { render } = setup();
+  const c = render('![A cat](cat.png)\n\n![Dog](dog.png "The dog")\n\nText ![icon](i.png) here\n\n[![Badge](b.svg)](https://x.example)\n\n![](empty.png)');
+  const captions = [...c.querySelectorAll("figcaption")].map((f) => f.textContent);
+  same(captions, ["A cat", "The dog"]);
+  assert.equal(c.querySelectorAll("figure").length, 2);
+  assert.equal(c.querySelectorAll("img").length, 5);
+});
+
+test("wiki links point at the Markdown file next to the document", () => {
+  const { render } = setup();
+  const c = render("See [[Note Name]], [[notes/Setup Guide#First Steps|setup]], [[#Local Heading]] and [[image.png]].\n\n`[[not a link]]`");
+  const hrefs = [...c.querySelectorAll("a.wikilink")].map((a) => a.getAttribute("href"));
+  same(hrefs, ["Note%20Name.md", "notes/Setup%20Guide.md#first-steps", "#local-heading", "image.png"]);
+  same([...c.querySelectorAll("a.wikilink")].map((a) => a.textContent), ["Note Name", "setup", "Local Heading", "image.png"]);
+  assert.match(c.querySelector("code").textContent, /\[\[not a link\]\]/);
+});
+
+test("numbers headings when turned on, leaving a lone title unnumbered", () => {
+  const { window, render, messages } = setup();
+  window.mdr.setOptions({ numbers: true });
+  const c = render("# Title\n\n## Intro\n\n### Part\n\n### Part two\n\n## Next");
+  same([...c.querySelectorAll("h1, h2, h3")].map((h) => h.dataset.num ?? ""), ["", "1", "1.1", "1.2", "2"]);
+  same(messages.findLast((m) => m.type === "outline").items.map((i) => i.text),
+    ["Title", "1 Intro", "1.1 Part", "1.2 Part two", "2 Next"]);
+  window.mdr.setOptions({ numbers: false });
+  assert.equal(c.querySelector("[data-num]"), null);
+});
+
+test("marks links to missing headings and reports local files for checking", () => {
+  const { window, render, messages } = setup();
+  const c = render("## Here\n\n[ok](#here) [gone](#nowhere) [file](other.md#x) [web](https://x.example)");
+  const links = [...c.querySelectorAll("a")];
+  assert.equal(links[0].classList.contains("broken"), false);
+  assert.equal(links[1].classList.contains("broken"), true);
+  const report = messages.findLast((m) => m.type === "links");
+  same(report.files, ["file:///tmp/docs/other.md"]);
+  window.mdr.markBroken(report.token, ["file:///tmp/docs/other.md"]);
+  assert.equal(links[2].classList.contains("broken"), true);
+  assert.equal(links[3].classList.contains("broken"), false);
+});
+
+test("a reload highlights the block that changed", () => {
+  const { render } = setup();
+  render("# A\n\none\n\ntwo\n\nthree");
+  const c = render("# A\n\none\n\ntwo changed\n\nthree", { scroll: -1 });
+  const marked = c.querySelector(".just-edited");
+  assert.ok(marked);
+  assert.equal(marked.textContent, "two changed");
+  // The same text again (for example ⌘R) highlights nothing.
+  render("# A\n\none\n\ntwo changed\n\nthree", { scroll: -1 });
+});
+
+test("j, k, n, p, g and G are ignored with modifier keys", () => {
+  const { window, render } = setup();
+  render("# A\n\ntext\n\n## B\n\nmore");
+  const press = (key, extra = {}) => {
+    const e = new window.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...extra });
+    window.document.body.dispatchEvent(e);
+    return e.defaultPrevented;
+  };
+  assert.equal(press("n"), true);
+  assert.equal(press("G"), true);
+  assert.equal(press("j", { metaKey: true }), false);
+  assert.equal(press("x"), false);
+});
+
+test("wiki links leave citation-style links alone and handle dotted names and embeds", () => {
+  const { render } = setup();
+  const c = render("See [[1]](https://a.example) and [x [[Note]]](https://b.example).\n\n[[Node.js]] [[2024.01.15]] [[#]] ![[pic.png]]");
+  const hrefs = [...c.querySelectorAll("a")].map((a) => a.getAttribute("href"));
+  same(hrefs, ["https://a.example", "https://b.example", "Node.js.md", "2024.01.15.md"]);
+  assert.equal(c.querySelector("img").getAttribute("src"), "pic.png");
+});
+
+test("a front matter change alone doesn't count as an edit", () => {
+  const { render } = setup();
+  render("---\nupdated: 1\n---\n\n# A\n\none");
+  const c = render("---\nupdated: 2\n---\n\n# A\n\none", { scroll: -1 });
+  assert.equal(c.querySelector(".just-edited"), null);
+  const d = render("---\nupdated: 3\n---\n\n# A\n\none, edited", { scroll: -1 });
+  assert.equal(d.querySelector(".just-edited")?.textContent, "one, edited");
+});

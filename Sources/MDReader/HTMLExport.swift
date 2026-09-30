@@ -4,8 +4,9 @@ import UniformTypeIdentifiers
 /// Turns the rendered page into a single self-contained .html file or rich-text clipboard contents.
 enum HTMLExport {
     static func document(for page: RenderedPage) -> String {
-        let css = Bundle.main.resourceURL
-            .flatMap { try? String(contentsOf: $0.appendingPathComponent("web/style.css"), encoding: .utf8) } ?? ""
+        let css = (Bundle.main.resourceURL
+            .flatMap { try? String(contentsOf: $0.appendingPathComponent("web/style.css"), encoding: .utf8) } ?? "")
+            + "\n" + CustomCSS.read()
         let body = inlineImages(page)
         // KaTeX markup needs its stylesheet; it is too heavy to inline with fonts, so link the CDN copy.
         let katex = page.hasMath
@@ -23,7 +24,7 @@ enum HTMLExport {
             \(css)
             </style>
             </head>
-            <body data-font="\(Prefs.font.rawValue)">
+            <body data-font="\(Prefs.font.rawValue)"\(UserDefaults.standard.bool(forKey: Prefs.wrapCode) ? " class=\"wrap-code\"" : "")>
             <main id="content" class="markdown-body">
             \(body)
             </main>

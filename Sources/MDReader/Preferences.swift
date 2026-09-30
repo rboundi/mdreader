@@ -61,6 +61,9 @@ enum Prefs {
     static let sidebarPane = "sidebarPane"
     static let scrollMemory = "scrollMemory"
     static let editorApp = "editorApp"
+    static let wrapCode = "wrapCode"
+    static let numberHeadings = "numberHeadings"
+    static let followEdits = "followEdits"
 
     static var defaultPDFFolder: String {
         FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first?.path
@@ -96,6 +99,9 @@ enum Prefs {
             printHeaderFooter: true,
             outlineVisible: false,
             checkForUpdates: true,
+            wrapCode: false,
+            numberHeadings: false,
+            followEdits: true,
         ])
     }
 
@@ -114,6 +120,48 @@ enum Prefs {
     static var zoomLevel: Double {
         get { UserDefaults.standard.double(forKey: zoom) }
         set { UserDefaults.standard.set(min(max(newValue, 0.5), 3.0), forKey: zoom) }
+    }
+}
+
+/// custom.css in Application Support, applied on top of the built-in styles.
+enum CustomCSS {
+    static var url: URL {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support")
+        return support.appendingPathComponent("MDReader/custom.css")
+    }
+
+    static func read() -> String {
+        (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+    }
+
+    /// Creates the file if needed and opens it in the chosen editor, or TextEdit.
+    @MainActor static func edit() {
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: url.path) {
+            try? fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let template = """
+                /* Styles here apply on top of MDReader's own. Changes show when you save. For example:
+
+                .markdown-body { font-size: 18px; }
+                .markdown-body h1, .markdown-body h2 { border: 0; }
+                */
+
+                """
+            try? template.write(to: url, atomically: true, encoding: .utf8)
+        }
+        AppState.shared.reader.watchCustomCSS()
+        // The Markdown editor only if it handles CSS files; otherwise TextEdit.
+        let editor = AppState.shared.editorURL.flatMap { editor in
+            NSWorkspace.shared.urlsForApplications(toOpen: url).contains { $0.standardizedFileURL == editor.standardizedFileURL }
+                ? editor : nil
+        }
+        let app = editor ?? NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.TextEdit")
+        if let app {
+            NSWorkspace.shared.open([url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
+        } else {
+            NSWorkspace.shared.open(url)
+        }
     }
 }
 

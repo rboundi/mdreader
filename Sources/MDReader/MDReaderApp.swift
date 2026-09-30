@@ -31,7 +31,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        MainActor.assumeIsolated { AppState.shared.checkForUpdatesInBackground() }
+        MainActor.assumeIsolated {
+            AppState.shared.checkForUpdatesInBackground()
+            AppState.shared.removeOldClipboardFiles()
+        }
         // Mouse side buttons go Back and Forward.
         NSEvent.addLocalMonitorForEvents(matching: .otherMouseDown) { event in
             guard event.buttonNumber == 3 || event.buttonNumber == 4 else { return event }
@@ -71,6 +74,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated { AppState.shared.open(urls) }
     }
 
+    /// Recent files in the Dock icon's menu.
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let recents = MainActor.assumeIsolated { AppState.shared.recents.prefix(10) }
+        guard !recents.isEmpty else { return nil }
+        let menu = NSMenu()
+        for url in recents {
+            let item = NSMenuItem(title: url.lastPathComponent, action: #selector(openFromDock(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = url
+            item.toolTip = url.path
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    @objc private func openFromDock(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        MainActor.assumeIsolated { AppState.shared.open([url]) }
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -105,9 +129,18 @@ struct AppCommands: Commands {
                 .keyboardShortcut("o", modifiers: [.command, .option])
                 .disabled(state.selected == nil)
             Divider()
+            Button("Open Clipboard") { state.openClipboard() }
+                .keyboardShortcut("v", modifiers: [.command, .shift])
+            Divider()
             Button("Reopen Closed Tab") { state.reopenClosedTab() }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
                 .disabled(state.closedTabs.isEmpty)
+            Menu("Recently Closed") {
+                ForEach(state.recentlyClosed, id: \.self) { url in
+                    Button(url.lastPathComponent) { state.reopen(url) }
+                }
+            }
+            .disabled(state.closedTabs.isEmpty)
             Button("Close Tab") { state.closeTabOrWindow() }
                 .keyboardShortcut("w")
         }

@@ -110,6 +110,7 @@ struct PaletteView: View {
         .onDisappear {
             if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
             keyMonitor = nil
+            DispatchQueue.main.async { state.focusReader() }
         }
     }
 
