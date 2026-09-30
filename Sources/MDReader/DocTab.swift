@@ -19,15 +19,34 @@ final class DocTab: Identifiable {
     init(url: URL) {
         self.url = url.standardizedFileURL
         load()
-        watcher = FileWatcher(url: self.url) { [weak self] in
-            self?.load()
-            self?.onChange?()
-        }
+        startWatching()
     }
 
     func reload() {
         load()
+        // The watcher gives up if the file stays missing; pick it up again once it's back.
+        if error == nil, watcher?.isWatching != true { startWatching() }
         onChange?()
+    }
+
+    private func startWatching() {
+        watcher = FileWatcher(url: url) { [weak self] in
+            guard let self else { return }
+            self.load()
+            self.onChange?()
+        }
+    }
+
+    /// UTF-8 first; UTF-16 only with a byte-order mark; then Windows-1252 / Latin-1 for old files.
+    private static func decode(_ data: Data) -> String {
+        if data.starts(with: [0xFF, 0xFE]) || data.starts(with: [0xFE, 0xFF]),
+            let s = String(data: data, encoding: .utf16)
+        {
+            return s
+        }
+        return String(data: data, encoding: .utf8)
+            ?? String(data: data, encoding: .windowsCP1252)
+            ?? String(decoding: data, as: UTF8.self)
     }
 
     /// Words that contain a letter or digit, so Markdown punctuation (#, -, |, ```) isn't counted.
@@ -47,10 +66,7 @@ final class DocTab: Identifiable {
 
     private func load() {
         do {
-            let data = try Data(contentsOf: url)
-            text = String(data: data, encoding: .utf8)
-                ?? String(data: data, encoding: .utf16)
-                ?? String(decoding: data, as: UTF8.self)
+            text = Self.decode(try Data(contentsOf: url))
             error = nil
             wordCount = Self.countWords(text)
         } catch {

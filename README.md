@@ -42,7 +42,7 @@ Most Markdown apps are editors, note-taking suites, or Electron wrappers. MDRead
 - Light / Dark / System theme, sans or serif reading font, text size, and text width (narrow to full)
 
 **Everything else**
-- `mdr` command: `mdr README.md`, or `cat notes.md | mdr`
+- `mdr` command: `mdr README.md`, or pipe into it with `cat notes.md | mdr`
 - Open files by drag & drop, from Finder's *Open With*, or from *Open Recent*
 - Optional weekly check for new versions on GitHub
 

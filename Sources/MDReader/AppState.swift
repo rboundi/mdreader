@@ -29,6 +29,8 @@ final class AppState: ObservableObject {
     }
     @Published var availableUpdate: UpdateChecker.Release?
     @Published private(set) var closedTabs: [URL] = []
+    /// Bumped whenever the page is re-rendered, so the find bar can search the new content.
+    @Published private(set) var renderGeneration = 0
 
     let reader = ReaderController()
 
@@ -46,6 +48,7 @@ final class AppState: ObservableObject {
             if self?.activeHeading != id { self?.activeHeading = id }
         }
         reader.webView.onDropFiles = { [weak self] urls in self?.open(urls) }
+        reader.onDisplay = { [weak self] in self?.renderGeneration += 1 }
     }
 
     // MARK: Opening & closing
@@ -84,7 +87,7 @@ final class AppState: ObservableObject {
         if let lastID { selectedID = lastID }
         persistTabs()
         if !skipped.isEmpty {
-            show(Toast(message: "\(skipped.joined(separator: ", ")) isn't a text file"))
+            show(Toast(message: "Can't open \(skipped.joined(separator: ", ")): not a text file"))
         }
     }
 
@@ -303,7 +306,7 @@ final class AppState: ObservableObject {
         let literal = script.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         let source = """
-            do shell script "mkdir -p /usr/local/bin && ln -sf " & quoted form of "\(literal)" & " /usr/local/bin/mdr" with administrator privileges
+            do shell script "mkdir -p /usr/local/bin && cp " & quoted form of "\(literal)" & " /usr/local/bin/mdr && chmod 755 /usr/local/bin/mdr" with administrator privileges
             """
         var error: NSDictionary?
         NSAppleScript(source: source)?.executeAndReturnError(&error)

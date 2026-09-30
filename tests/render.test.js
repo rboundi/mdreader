@@ -83,6 +83,27 @@ test("sanitizes raw HTML", () => {
   assert.equal(c.querySelector("a").getAttribute("href"), null);
 });
 
+test("removes javascript: links hidden with whitespace and SVG animation", () => {
+  const { render } = setup();
+  const c = render(
+    '<a href="jav&#x09;ascript:alert(1)">a</a> <a href=" JaVaScRiPt:alert(1)">b</a> ' +
+    '<a href="data:text/html,x">c</a> <a href="https://ok.example">d</a> <a href="#top">e</a>\n\n' +
+    '<svg><a><animate attributeName="href" values="javascript:alert(1)"/><text>x</text></a></svg>',
+  );
+  const hrefs = [...c.querySelectorAll("a")].map((a) => a.getAttribute("href"));
+  same(hrefs.slice(0, 5), [null, null, null, "https://ok.example", "#top"]);
+  assert.equal(c.querySelector("animate"), null);
+});
+
+test("keeps heading ids unique alongside ids from raw HTML", () => {
+  const { render, messages } = setup();
+  render('<h2 id="intro">Intro</h2>\n\n## Intro\n\n<div id="setup"></div>\n\n## Setup');
+  const ids = messages.findLast((m) => m.type === "outline").items.map((i) => i.id);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.equal(ids[0], "intro");
+  assert.notEqual(ids[2], "setup");
+});
+
 test("highlights code and adds a copy button", () => {
   const { render } = setup();
   const pre = render("```js\nconst x = 1;\n```").querySelector("pre");
@@ -172,4 +193,5 @@ test("HTML export strips reader UI and makes links absolute", async () => {
   assert.doesNotMatch(out.html, /copy-btn|class="anchor"/);
   assert.match(out.html, /href="file:\/\/\/tmp\/docs\/other\.md"/);
   same(out.images, ["file:///tmp/docs/pic.png"]);
+  assert.doesNotMatch(out.text, /Copy/);
 });

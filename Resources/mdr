@@ -1,17 +1,22 @@
 #!/bin/sh
 # mdr — open Markdown files in MDReader.
 #   mdr README.md docs/*.md     open files as tabs
-#   cat notes.md | mdr          read Markdown from stdin
-#   mdr                         just bring MDReader to the front
+#   cat notes.md | mdr          read Markdown from a pipe
+#   mdr                         bring MDReader to the front
 BUNDLE_ID="io.github.rboundi.mdreader"
+TMP="${TMPDIR:-/tmp}"
 
 if [ $# -eq 0 ]; then
-  if [ -t 0 ]; then
+  # Only read stdin when something is actually piped or redirected in.
+  if [ -p /dev/stdin ] || [ -f /dev/stdin ]; then
+    # Clear out copies of earlier piped input.
+    find "$TMP" -maxdepth 1 -type d -name 'mdr.*' -mtime +1 -exec rm -rf {} + 2>/dev/null
+    dir=$(mktemp -d "$TMP/mdr.XXXXXX") || exit 1
+    cat > "$dir/stdin.md"
+    set -- "$dir/stdin.md"
+  else
     exec open -b "$BUNDLE_ID"
   fi
-  dir=$(mktemp -d "${TMPDIR:-/tmp}/mdr.XXXXXX") || exit 1
-  cat > "$dir/stdin.md"
-  set -- "$dir/stdin.md"
 fi
 
 for f in "$@"; do
@@ -19,6 +24,14 @@ for f in "$@"; do
     echo "mdr: $f: No such file" >&2
     exit 1
   fi
+done
+
+# Keep names like "-notes.md" from being read as options by open(1).
+first=1
+for f in "$@"; do
+  if [ "$first" = 1 ]; then set --; first=0; fi
+  case "$f" in -*) f="./$f" ;; esac
+  set -- "$@" "$f"
 done
 
 exec open -b "$BUNDLE_ID" "$@"

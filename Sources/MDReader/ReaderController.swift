@@ -10,6 +10,7 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
     var onOpenFile: ((URL, String?) -> Void)?
     var onOutline: (([OutlineItem]) -> Void)?
     var onActiveHeading: ((String?) -> Void)?
+    var onDisplay: (() -> Void)?
 
     private let templateURL = Bundle.main.resourceURL?.appendingPathComponent("web/index.html")
     private var ready = false
@@ -60,6 +61,7 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
         // Same document + mode: keep the reader where it is (e.g. file changed on disk).
         let scroll: Double = key == currentKey ? -1 : (scrollPositions[key] ?? 0)
         currentKey = key
+        defer { onDisplay?() }
         let anchor = tab.pendingAnchor ?? ""
         tab.pendingAnchor = nil
         send([
@@ -362,21 +364,38 @@ enum MarkdownFiles {
         extensions.contains(url.pathExtension.lowercased())
     }
 
-    /// Markdown or any other plain-text file (README, LICENSE, .rst…), but not a folder or binary.
+    static let maxFileSize = 20 * 1024 * 1024
+
+    /// Markdown or any other plain-text file (README, LICENSE, .rst…) up to 20 MB.
     static func canOpen(_ url: URL) -> Bool {
-        var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue
+        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+            values.isRegularFile == true, (values.fileSize ?? 0) <= maxFileSize
         else { return false }
-        if isMarkdown(url) || url.pathExtension.isEmpty { return true }
-        return contentType(url)?.conforms(to: .text) ?? false
+        if !isMarkdown(url), contentType(url)?.conforms(to: .text) != true, !url.pathExtension.isEmpty {
+            return false
+        }
+        return !looksBinary(url)
     }
 
-    /// Documents a link may open in their default app. Apps, scripts and installers are excluded.
+    /// A NUL byte in the first 8 KB means it's not text (catches extension-less binaries).
+    private static func looksBinary(_ url: URL) -> Bool {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return true }
+        defer { try? handle.close() }
+        let head = (try? handle.read(upToCount: 8192)) ?? Data()
+        // UTF-16 text legitimately contains NULs; it starts with a byte-order mark.
+        if head.starts(with: [0xFF, 0xFE]) || head.starts(with: [0xFE, 0xFF]) { return false }
+        return head.contains(0)
+    }
+
+    /// Documents a link may open in their default app. Apps, scripts, installers, web pages,
+    /// SVGs and configuration profiles are shown in Finder instead.
     static func isSafeToOpen(_ url: URL) -> Bool {
         guard let type = contentType(url) else { return false }
-        let risky: [UTType] = [.application, .executable, .script, .shellScript, .package, .bundle]
+        let risky: [UTType] = [
+            .application, .executable, .script, .shellScript, .package, .bundle, .html, .svg, .xml,
+        ]
         if risky.contains(where: { type.conforms(to: $0) }) { return false }
-        let safe: [UTType] = [.image, .pdf, .text, .audiovisualContent, .presentation, .spreadsheet]
+        let safe: [UTType] = [.image, .pdf, .plainText, .audiovisualContent, .presentation, .spreadsheet]
         return safe.contains(where: { type.conforms(to: $0) })
     }
 

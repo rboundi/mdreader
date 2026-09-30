@@ -230,8 +230,8 @@ struct FindBar: View {
             focused = true
             if let dir = note.object as? Int { step(dir) }
         }
-        .onChange(of: state.selectedID) { _ in
-            // Another tab was rendered (that call is already queued ahead of this one); search it too.
+        .onChange(of: state.renderGeneration) { _ in
+            // The page was re-rendered (tab switch, reload, source toggle); search the new content.
             state.reader.find(query) { c, t in current = c; total = t }
         }
     }

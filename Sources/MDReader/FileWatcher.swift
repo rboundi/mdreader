@@ -14,6 +14,10 @@ final class FileWatcher {
         start(attempt: 0)
     }
 
+    /// False once the file has been missing long enough that watching stopped.
+    var isWatching: Bool { source != nil || retrying }
+    private var retrying = false
+
     deinit {
         pending?.cancel()
         source?.cancel()
@@ -23,13 +27,15 @@ final class FileWatcher {
         let fd = open(url.path, O_EVTONLY)
         guard fd >= 0 else {
             // The file may be mid-replacement; retry a few times, then give up quietly.
-            if attempt < 10 {
+            retrying = attempt < 10
+            if retrying {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
                     self?.start(attempt: attempt + 1)
                 }
             }
             return
         }
+        retrying = false
         let src = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd, eventMask: [.write, .extend, .delete, .rename], queue: .main)
         src.setEventHandler { [weak self, weak src] in

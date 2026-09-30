@@ -112,17 +112,35 @@
 
   // ---------- post-processing ----------
 
+  const URL_ATTRS = ["href", "src", "xlink:href", "action", "formaction", "poster", "srcset"];
+  const SAFE_PROTOCOLS = ["http:", "https:", "mailto:", "file:"];
+
+  // Parse the URL the way the browser will (tabs/newlines inside "javascript:" included)
+  // and only keep the protocols a document legitimately links to.
+  function isSafeURL(value, name) {
+    const v = value.trim();
+    if (v.startsWith("#")) return true;
+    if (name === "src" && /^data:image\/(png|jpe?g|gif|webp|avif|bmp)[;,]/i.test(v)) return true;
+    try {
+      return SAFE_PROTOCOLS.includes(new URL(v, document.baseURI).protocol);
+    } catch (_) {
+      return false;
+    }
+  }
+
   // Markdown can contain raw HTML; drop anything that could run code or escape the page.
   function sanitize(root) {
-    root.querySelectorAll("script, iframe, frame, object, embed, form, meta, link, base, style")
-      .forEach((el) => el.remove());
+    root.querySelectorAll(
+      "script, iframe, frame, object, embed, form, meta, link, base, style, animate, set, animateMotion, animateTransform",
+    ).forEach((el) => el.remove());
     for (const el of root.querySelectorAll("*")) {
       for (const attr of [...el.attributes]) {
         const name = attr.name.toLowerCase();
         if (name.startsWith("on") || name === "srcdoc") {
           el.removeAttribute(attr.name);
-        } else if (["href", "src", "xlink:href", "action", "formaction", "poster"].includes(name)
-                   && /^\s*(javascript|vbscript|data:text\/html)/i.test(attr.value)) {
+        } else if (URL_ATTRS.includes(name) && name !== "srcset" && !isSafeURL(attr.value, name)) {
+          el.removeAttribute(attr.name);
+        } else if (name === "srcset" && /(javascript|vbscript|data):/i.test(attr.value.replace(/[\x00-\x20]/g, ""))) {
           el.removeAttribute(attr.name);
         }
       }
@@ -130,10 +148,17 @@
   }
 
   function enhance(root) {
-    // Heading anchors
+    // Heading anchors. Ids written in raw HTML count as taken, so every heading id stays unique.
     const used = new Map();
+    const taken = new Set();
+    root.querySelectorAll("[id]:not(h1, h2, h3, h4, h5, h6)").forEach((el) => taken.add(el.id));
     root.querySelectorAll("h1, h2, h3, h4, h5, h6").forEach((h) => {
-      if (!h.id) h.id = slugify(h.textContent, used);
+      if (!h.id || taken.has(h.id)) {
+        let id;
+        do { id = slugify(h.textContent, used); } while (taken.has(id));
+        h.id = id;
+      }
+      taken.add(h.id);
       const a = document.createElement("a");
       a.className = "anchor";
       a.href = "#" + h.id;
@@ -228,8 +253,8 @@
   let diagramQueue = Promise.resolve();
 
   // Mermaid can't run two renders at once, so queue them.
-  function renderDiagrams(root, theme) {
-    const run = diagramQueue.then(() => drawDiagrams(root, theme));
+  function renderDiagrams(root, theme, token) {
+    const run = diagramQueue.then(() => (token === undefined || token === renderToken) && drawDiagrams(root, theme));
     diagramQueue = run.catch(() => {});
     return run;
   }
@@ -359,7 +384,7 @@
     const startY = window.scrollY;
     await Promise.allSettled([
       renderMath(content),
-      renderDiagrams(content),
+      renderDiagrams(content, undefined, token),
       imagesLoaded(pending, 2000),
     ]);
     if (token !== renderToken || Math.abs(window.scrollY - startY) > 40) return;
@@ -487,9 +512,15 @@
       const href = a.getAttribute("href");
       if (!href.startsWith("#")) a.setAttribute("href", a.href);
     });
+    // innerText needs a laid-out element, so measure the cleaned copy off-screen.
+    clone.style.cssText = "position:absolute;left:-100000px;top:0;width:800px";
+    document.body.append(clone);
+    const text = clone.innerText ?? clone.textContent;
+    clone.remove();
+    clone.removeAttribute("style");
     return {
       html: clone.innerHTML,
-      text: content.innerText,
+      text,
       title: document.title,
       images,
       hasMath: !!clone.querySelector(".katex"),
