@@ -297,6 +297,8 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         // WebKit's page process crashed or was killed: reload the template and redraw the current tab.
         ready = false
+        lightboxOpen = false
+        self.webView.canScrollHorizontally = false
         pendingRender = lastRender
         loadTemplate()
     }

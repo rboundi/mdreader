@@ -109,6 +109,9 @@
   };
 
   marked.use({ gfm: true }, markedFootnote({ description: "Footnotes" }), math);
+  // For locating headings in the source. Kept separate because lexing with the footnote extension
+  // outside marked.parse leaves it in a broken state for the next document.
+  const placeLexer = new marked.Marked({ gfm: true }, math);
   hljs.configure({ ignoreUnescapedHTML: true });
 
   // ---------- post-processing ----------
@@ -347,6 +350,7 @@
     const sync = p.sync && current.doc === docKey && current.source !== !!p.source ? readPlace() : null;
     clearFind();
     closeLightbox();
+    hideFootnote();
     // Re-rendering the same document (file changed on disk) keeps collapsed sections collapsed.
     const keepFolds = p.scroll < 0 && !p.source
       ? [...content.querySelectorAll(".collapsed")].map((h) => h.id) : [];
@@ -385,6 +389,7 @@
       }
     }
     current = { doc: docKey, source: !!p.source, md: p.md || "" };
+    checkHorizontalScroll();
     sendOutline();
     updateProgress();
     const reposition = () => {
@@ -659,7 +664,7 @@
     const [, body] = splitFrontMatter(md);
     let pos = md.length - body.length;
     const offsets = [];
-    for (const token of marked.lexer(body)) {
+    for (const token of placeLexer.lexer(body)) {
       if (token.type === "heading") offsets.push(pos);
       pos += token.raw.length;
     }
@@ -678,7 +683,10 @@
         headingOffsets(current.md).forEach((o, i) => { if (o <= offset) place.index = i; });
       }
     } else {
-      topHeadings().forEach((h, i) => {
+      const hs = topHeadings();
+      // Raw HTML headings aren't Markdown headings; the counts then differ, so use the ratio.
+      if (hs.length !== headingOffsets(current.md).length) return place;
+      hs.forEach((h, i) => {
         if (!h.classList.contains("folded-away") && h.getBoundingClientRect().top <= 12) place.index = i;
       });
     }
@@ -782,12 +790,16 @@
   // sideways (wide code, tables, math). The app asks the page which one it is.
   let canScrollX = false;
   let pointerQueued = false;
-  document.addEventListener("mousemove", (e) => {
-    if (pointerQueued) return;
+  let pointer = null;
+
+  // Also re-checked after scrolling and rendering, since content can move under a still pointer.
+  function checkHorizontalScroll() {
+    if (pointerQueued || !pointer) return;
     pointerQueued = true;
     requestAnimationFrame(() => {
       pointerQueued = false;
-      const el = e.target.closest?.("pre, .table-wrap, .math-display, .mermaid-block");
+      const target = document.elementFromPoint?.(pointer.x, pointer.y);
+      const el = target?.closest?.("pre, .table-wrap, .math-display, .mermaid-block");
       const can = !!(el && el.scrollWidth > el.clientWidth + 1)
         || document.documentElement.scrollWidth > document.documentElement.clientWidth + 1;
       if (can !== canScrollX) {
@@ -795,6 +807,11 @@
         post({ type: "hscroll", can });
       }
     });
+  }
+
+  document.addEventListener("mousemove", (e) => {
+    pointer = { x: e.clientX, y: e.clientY };
+    checkHorizontalScroll();
   }, { passive: true });
 
   // ---------- events ----------
@@ -853,6 +870,7 @@
   window.addEventListener("scroll", () => {
     updateProgress();
     hideFootnote();
+    checkHorizontalScroll();
     if (scrollTimer) return;
     scrollTimer = setTimeout(() => {
       scrollTimer = null;

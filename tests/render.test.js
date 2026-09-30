@@ -292,3 +292,22 @@ test("switching to source keeps the reader at the same heading", () => {
   assert.equal(c.className, "markdown-body");
 });
 
+
+test("switching to source and back doesn't break footnotes in the next document", () => {
+  const { render } = setup();
+  const plain = "# Plain\n\nPlain text";
+  render(plain);
+  render(plain, { source: true, sync: true, scroll: -1 });
+  const c = render("X[^a]\n\n[^a]: Note.", { title: "other.md" });
+  assert.doesNotMatch(c.textContent, /Plain text/);
+  assert.ok(c.querySelector(".footnotes"));
+});
+
+test("the zoomed image and footnote preview close when another document renders", () => {
+  const { window, render } = setup();
+  const c = render("Claim.[^1]\n\n[^1]: Note.");
+  c.querySelector("[data-footnote-ref]").dispatchEvent(new window.MouseEvent("mouseover", { bubbles: true }));
+  assert.ok(window.document.querySelector(".footnote-tip"));
+  render("# Other", { title: "other.md" });
+  assert.equal(window.document.querySelector(".footnote-tip"), null);
+});

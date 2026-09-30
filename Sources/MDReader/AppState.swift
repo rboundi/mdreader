@@ -109,6 +109,7 @@ final class AppState: ObservableObject {
                     continue
                 }
                 url = first
+                focusMode = false
                 sidebarPane = .files
                 sidebarVisible = true
             }
@@ -196,6 +197,7 @@ final class AppState: ObservableObject {
         if selectedID == id {
             selectedID = tabs.isEmpty ? nil : tabs[min(index, tabs.count - 1)].id
         }
+        if tabs.isEmpty { focusMode = false }
         persistTabs()
     }
 
@@ -307,12 +309,17 @@ final class AppState: ObservableObject {
     }
 
     func toggleSidebar() {
+        focusMode = false
         sidebarVisible.toggle()
     }
 
     /// Shows the sidebar on `pane`, or hides it if that pane is already showing.
     func showSidebar(_ pane: SidebarPane) {
-        if sidebarVisible && sidebarPane == pane {
+        if focusMode {
+            focusMode = false
+            sidebarPane = pane
+            sidebarVisible = true
+        } else if sidebarVisible && sidebarPane == pane {
             sidebarVisible = false
         } else {
             sidebarPane = pane

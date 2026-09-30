@@ -18,7 +18,7 @@
 - Math with `$inline$`, `$$display$$` or ```` ```math ```` blocks (KaTeX)
 - Diagrams from ```` ```mermaid ```` blocks: flowchart, sequence, class, state, ER, Gantt, pie and more
 - Rendered or Markdown source view (<kbd>⌘</kbd><kbd>/</kbd>), staying at the same section
-- Focus mode hides the tabs, toolbar and sidebar (<kbd>⇧</kbd><kbd>⌘</kbd><kbd>F</kbd>)
+- Focus mode hides the tabs, toolbar and sidebar (<kbd>⇧</kbd><kbd>⌘</kbd><kbd>F</kbd>, <kbd>Esc</kbd> to leave)
 - Footnotes show on hover
 - Sidebar with the document outline or the other Markdown files in the folder
 - Collapsible sections, image zoom and a reading progress bar

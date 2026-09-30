@@ -35,10 +35,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Mouse side buttons go Back and Forward.
         NSEvent.addLocalMonitorForEvents(matching: .otherMouseDown) { event in
             guard event.buttonNumber == 3 || event.buttonNumber == 4 else { return event }
-            MainActor.assumeIsolated {
-                if event.buttonNumber == 3 { AppState.shared.goBack() } else { AppState.shared.goForward() }
+            let back = event.buttonNumber == 3
+            let handled = MainActor.assumeIsolated { () -> Bool in
+                let state = AppState.shared
+                guard NSApp.keyWindow === state.reader.webView.window else { return false }
+                if back { state.goBack() } else { state.goForward() }
+                return true
             }
-            return nil
+            return handled ? nil : event
         }
         // Escape leaves focus mode, unless it's closing something else first.
         NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -135,7 +139,7 @@ struct AppCommands: Commands {
                 .keyboardShortcut("p")
             Button("Jump to Heading…") { state.palette = state.palette == .headings ? nil : .headings }
                 .keyboardShortcut("j", modifiers: [.command, .shift])
-                .disabled(state.selected == nil)
+                .disabled(state.selected == nil || state.selected?.showSource == true)
         }
 
         CommandGroup(after: .pasteboard) {
