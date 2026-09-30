@@ -37,11 +37,14 @@ enum HTMLExport {
     /// Puts HTML (for Mail, Notes, Pages, Google Docs…), RTF and plain text on the clipboard.
     static func copyRichText(_ page: RenderedPage) {
         let html = "<meta charset=\"utf-8\">" + inlineImages(page)
+        // Converting to RTF downloads web images on the main thread, so leave them out of the RTF.
+        let offline = html.replacingOccurrences(
+            of: #"<img\b[^>]*\bsrc="https?:[^"]*"[^>]*>"#, with: "", options: [.regularExpression, .caseInsensitive])
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.declareTypes([.html, .rtf, .string], owner: nil)
         pb.setString(html, forType: .html)
-        if let data = html.data(using: .utf8),
+        if let data = offline.data(using: .utf8),
             let attributed = try? NSAttributedString(
                 data: data,
                 options: [.documentType: NSAttributedString.DocumentType.html, .characterEncoding: String.Encoding.utf8.rawValue],

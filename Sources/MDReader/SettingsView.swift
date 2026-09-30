@@ -14,6 +14,7 @@ struct SettingsView: View {
     @AppStorage(Prefs.numberHeadings) private var numberHeadings = false
     @AppStorage(Prefs.wrapCode) private var wrapCode = false
     @AppStorage(Prefs.followEdits) private var followEdits = true
+    @AppStorage(Prefs.lineNumbers) private var lineNumbers = false
 
     private var editorName: String? {
         editorPath.isEmpty ? nil
@@ -43,6 +44,7 @@ struct SettingsView: View {
                 }
                 Toggle("Number headings", isOn: $numberHeadings)
                 Toggle("Wrap long lines in code blocks", isOn: $wrapCode)
+                Toggle("Line numbers in Markdown source", isOn: $lineNumbers)
                 HStack {
                     Text("Custom CSS")
                     Spacer()

@@ -20,7 +20,7 @@
 - Syntax-highlighted code blocks with a copy button, optionally wrapping long lines
 - Math with `$inline$`, `$$display$$` or ```` ```math ```` blocks (KaTeX)
 - Diagrams from ```` ```mermaid ```` blocks: flowchart, sequence, class, state, ER, Gantt, pie and more
-- Rendered or Markdown source view (<kbd>⌘</kbd><kbd>/</kbd>), staying at the same section
+- Rendered or Markdown source view (<kbd>⌘</kbd><kbd>/</kbd>), staying at the same section, with optional line numbers
 - Focus mode hides the tabs, toolbar and sidebar (<kbd>⇧</kbd><kbd>⌘</kbd><kbd>F</kbd>, <kbd>Esc</kbd> to leave)
 - Footnotes show on hover
 - Sidebar with the document outline or the other Markdown files in the folder
@@ -33,7 +33,7 @@
 - Word count, reading time, tasks done and last modified date in the title bar
 - The front matter `title:` is used as the tab and window title
 - Live reload when the file changes on disk, scrolling to the part that changed
-- Find in page
+- Find in page, and search across open tabs or the folder (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>F</kbd>)
 
 **Tabs**
 - Drag to reorder, right-click to close others or reveal in Finder
@@ -112,6 +112,7 @@ Select a `.md` file in Finder, press <kbd>⌘</kbd><kbd>I</kbd>, choose MDReader
 | Scroll down / up | <kbd>j</kbd> / <kbd>k</kbd> |
 | Next / previous heading | <kbd>n</kbd> / <kbd>p</kbd> |
 | Top / bottom | <kbd>g</kbd> / <kbd>G</kbd> |
+| Search in files | <kbd>⌥</kbd><kbd>⌘</kbd><kbd>F</kbd> |
 | Find / next / previous | <kbd>⌘</kbd><kbd>F</kbd> / <kbd>⌘</kbd><kbd>G</kbd> / <kbd>⇧</kbd><kbd>⌘</kbd><kbd>G</kbd> |
 | Reload from disk | <kbd>⌘</kbd><kbd>R</kbd> |
 | Zoom in / out / actual size | <kbd>⌘</kbd><kbd>+</kbd> / <kbd>⌘</kbd><kbd>-</kbd> / <kbd>⌘</kbd><kbd>0</kbd> |
@@ -119,7 +120,7 @@ Select a `.md` file in Finder, press <kbd>⌘</kbd><kbd>I</kbd>, choose MDReader
 
 ## Privacy
 
-MDReader only connects to the internet to load web images a document links to, and to check `api.github.com` for new versions once a week. The update check can be turned off in Settings. There is no analytics or telemetry.
+MDReader only connects to the internet to load web images a document links to, and to check `github.com` for new versions once a week. The update check can be turned off in Settings. There is no analytics or telemetry.
 
 ## Project layout
 
@@ -133,6 +134,7 @@ Sources/MDReader/
   ContentView.swift       Window layout, toolbar, find bar
   TabBar.swift            Tab strip
   SidebarView.swift       Sidebar and Files list
+  SearchView.swift        Search across tabs or the folder
   OutlineView.swift       Outline
   PaletteView.swift       Quick Open and Jump to Heading
   HTMLExport.swift        HTML export and rich-text copy

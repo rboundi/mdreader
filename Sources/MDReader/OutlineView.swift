@@ -6,9 +6,7 @@ struct OutlineView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if state.selected?.showSource == true {
-                placeholder("Not available in Markdown view")
-            } else if state.outline.isEmpty {
+            if state.outline.isEmpty {
                 placeholder("No headings")
             } else {
                 ScrollViewReader { proxy in

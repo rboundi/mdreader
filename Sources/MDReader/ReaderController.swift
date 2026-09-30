@@ -59,7 +59,14 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
     /// Picks up changes to custom.css. Does nothing until the file exists.
     func watchCustomCSS() {
         let url = CustomCSS.url
-        guard cssWatcher?.isWatching != true, FileManager.default.fileExists(atPath: url.path) else { return }
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            if !customCSS.isEmpty {
+                customCSS = ""
+                applyOptions()
+            }
+            return
+        }
+        guard cssWatcher?.isWatching != true else { return }
         cssWatcher = FileWatcher(url: url) { [weak self] in
             self?.customCSS = CustomCSS.read()
             self?.applyOptions()
@@ -149,7 +156,8 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
         let width = Prefs.width
         let theme = Prefs.appearanceMode == .sepia ? "sepia" : ""
         let defaults = UserDefaults.standard
-        let flags = [Prefs.wrapCode, Prefs.numberHeadings, Prefs.followEdits].map(defaults.bool(forKey:))
+        let flags = [Prefs.wrapCode, Prefs.numberHeadings, Prefs.followEdits, Prefs.lineNumbers]
+            .map(defaults.bool(forKey:))
         if ready,
             font != appliedFont || width != appliedWidth || theme != appliedTheme || flags != appliedFlags
                 || customCSS != appliedCSS
@@ -161,7 +169,8 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
             appliedCSS = customCSS
             let options: [String: Any] = [
                 "font": font.rawValue, "width": width.pixels, "theme": theme,
-                "wrap": flags[0], "numbers": flags[1], "followEdits": flags[2], "css": customCSS,
+                "wrap": flags[0], "numbers": flags[1], "followEdits": flags[2], "lineNumbers": flags[3],
+                "css": customCSS,
             ]
             webView.callAsyncJavaScript(
                 "window.mdr.setOptions(o)", arguments: ["o": options], in: nil, in: .page, completionHandler: nil)
@@ -180,8 +189,8 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
     // MARK: Find
 
     /// `scroll` false keeps the reader where it is (searching again after the page re-rendered).
-    func find(_ query: String, scroll: Bool = true, completion: @escaping (Int, Int) -> Void) {
-        callFind("window.mdr.find(q, s)", ["q": query, "s": scroll], completion)
+    func find(_ query: String, scroll: Bool = true, index: Int = 0, completion: @escaping (Int, Int) -> Void) {
+        callFind("window.mdr.find(q, s, i)", ["q": query, "s": scroll, "i": index], completion)
     }
 
     func findStep(_ direction: Int, completion: @escaping (Int, Int) -> Void) {
@@ -462,6 +471,19 @@ enum MarkdownFiles {
     }
 
     static let maxFileSize = 20 * 1024 * 1024
+
+    /// One URL per file: letter case as on disk, symlinks resolved, no /private prefix. Keeps a
+    /// file from opening in two tabs when it's reached by different spellings.
+    static func canonical(_ url: URL) -> URL {
+        guard let path = (try? url.resourceValues(forKeys: [.canonicalPathKey]))?.canonicalPath else {
+            return url.standardizedFileURL
+        }
+        return URL(fileURLWithPath: path, isDirectory: url.hasDirectoryPath).standardizedFileURL
+    }
+
+    static func isTooLarge(_ url: URL) -> Bool {
+        ((try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0) > maxFileSize
+    }
 
     /// Markdown or any other plain-text file (README, LICENSE, .rst…) up to 20 MB.
     static func canOpen(_ link: URL) -> Bool {

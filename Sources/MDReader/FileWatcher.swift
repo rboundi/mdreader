@@ -36,6 +36,8 @@ final class FileWatcher {
             return
         }
         retrying = false
+        // The file is back after being missing (deleted and recreated): report it.
+        if attempt > 0 { scheduleChange() }
         let src = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd, eventMask: [.write, .extend, .delete, .rename], queue: .main)
         src.setEventHandler { [weak self, weak src] in

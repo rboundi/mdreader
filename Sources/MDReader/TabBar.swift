@@ -4,6 +4,8 @@ import UniformTypeIdentifiers
 /// Editor-style tab strip: click to switch, drag to reorder, right-click for more.
 struct TabBar: View {
     @EnvironmentObject private var state: AppState
+    // Redraw the sepia or system background when the theme changes.
+    @AppStorage(Prefs.appearance) private var appearance = AppearanceMode.system.rawValue
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -26,7 +28,7 @@ struct TabBar: View {
             }
         }
         .frame(height: 34)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Color(nsColor: Palette.chrome))
     }
 
     /// When two tabs share a name, show the parent folder (or the file name, for two front matter

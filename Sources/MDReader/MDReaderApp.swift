@@ -30,6 +30,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated { AppState.shared.restoreTabs() }
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        // Picks up a custom.css created (or recreated) while MDReader was in the background.
+        MainActor.assumeIsolated { AppState.shared.reader.watchCustomCSS() }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated {
             AppState.shared.checkForUpdatesInBackground()
@@ -102,10 +107,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+/// The file name, plus its folder when another entry has the same name.
+private func menuTitle(_ url: URL, among urls: [URL]) -> String {
+    let name = url.lastPathComponent
+    let clash = urls.contains { $0 != url && $0.lastPathComponent == name }
+    return clash ? "\(name) — \(url.deletingLastPathComponent().lastPathComponent)" : name
+}
+
+private func open(_ link: String) {
+    if let url = URL(string: link) { NSWorkspace.shared.open(url) }
+}
+
 struct AppCommands: Commands {
     @ObservedObject var state: AppState
     @AppStorage(Prefs.appearance) private var appearance = AppearanceMode.system.rawValue
     @AppStorage(Prefs.contentWidth) private var contentWidth = ContentWidth.medium.rawValue
+    @AppStorage(Prefs.lineNumbers) private var lineNumbers = false
 
     var body: some Commands {
         CommandGroup(after: .appInfo) {
@@ -118,7 +135,7 @@ struct AppCommands: Commands {
                 .keyboardShortcut("o")
             Menu("Open Recent") {
                 ForEach(state.recents, id: \.self) { url in
-                    Button(url.lastPathComponent) { state.open([url]) }
+                    Button(menuTitle(url, among: state.recents)) { state.open([url]) }
                 }
                 Divider()
                 Button("Clear Menu") { state.clearRecents() }
@@ -137,7 +154,7 @@ struct AppCommands: Commands {
                 .disabled(state.closedTabs.isEmpty)
             Menu("Recently Closed") {
                 ForEach(state.recentlyClosed, id: \.self) { url in
-                    Button(url.lastPathComponent) { state.reopen(url) }
+                    Button(menuTitle(url, among: state.recentlyClosed)) { state.reopen(url) }
                 }
             }
             .disabled(state.closedTabs.isEmpty)
@@ -172,7 +189,7 @@ struct AppCommands: Commands {
                 .keyboardShortcut("p")
             Button("Jump to Heading…") { state.palette = state.palette == .headings ? nil : .headings }
                 .keyboardShortcut("j", modifiers: [.command, .shift])
-                .disabled(state.selected == nil || state.selected?.showSource == true)
+                .disabled(state.selected == nil)
         }
 
         CommandGroup(after: .pasteboard) {
@@ -182,13 +199,16 @@ struct AppCommands: Commands {
         }
 
         CommandGroup(after: .textEditing) {
-            Button("Find…") { state.findVisible = true; NotificationCenter.default.post(name: .findNext, object: nil) }
+            Button("Find…") { state.showFind() }
                 .keyboardShortcut("f")
                 .disabled(state.selected == nil)
-            Button("Find Next") { state.findVisible = true; NotificationCenter.default.post(name: .findNext, object: 1) }
+            Button("Search in Files…") { state.showSearch() }
+                .keyboardShortcut("f", modifiers: [.command, .option])
+                .disabled(state.selected == nil)
+            Button("Find Next") { state.showFind(step: 1) }
                 .keyboardShortcut("g")
                 .disabled(state.selected == nil)
-            Button("Find Previous") { state.findVisible = true; NotificationCenter.default.post(name: .findNext, object: -1) }
+            Button("Find Previous") { state.showFind(step: -1) }
                 .keyboardShortcut("g", modifiers: [.command, .shift])
                 .disabled(state.selected == nil)
         }
@@ -201,15 +221,18 @@ struct AppCommands: Commands {
                 state.showSidebar(.outline)
             }
             .keyboardShortcut("o", modifiers: [.command, .shift])
+            .disabled(state.selected == nil)
             Button(state.sidebarVisible && state.sidebarPane == .files ? "Hide Files" : "Show Files") {
                 state.showSidebar(.files)
             }
             .keyboardShortcut("e", modifiers: [.command, .shift])
+            .disabled(state.selected == nil)
             Button(state.selected?.showSource == true ? "Show Rendered" : "Show Markdown Source") {
                 state.toggleSource()
             }
             .keyboardShortcut("/")
             .disabled(state.selected == nil)
+            Toggle("Line Numbers in Markdown Source", isOn: $lineNumbers)
             Button("Reload") { state.reloadSelected() }
                 .keyboardShortcut("r")
                 .disabled(state.selected == nil)
@@ -235,11 +258,24 @@ struct AppCommands: Commands {
                 .keyboardShortcut(.tab, modifiers: .control)
             Button("Show Previous Tab") { state.selectTab(offset: -1) }
                 .keyboardShortcut(.tab, modifiers: [.control, .shift])
-            ForEach(1..<10) { n in
-                Button(n == 9 ? "Show Last Tab" : "Show Tab \(n)") { state.selectTab(number: n) }
-                    .keyboardShortcut(KeyEquivalent(Character("\(n)")))
+            Divider()
+            // The open tabs by name, ⌘1–⌘8, and ⌘9 for the last one, as in browsers.
+            ForEach(Array(state.tabs.prefix(8).enumerated()), id: \.element.id) { index, tab in
+                Button(tab.title) { state.selectedID = tab.id }
+                    .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")))
+            }
+            if state.tabs.count > 1 {
+                Button("Show Last Tab") { state.selectTab(number: 9) }
+                    .keyboardShortcut("9")
             }
             Divider()
+        }
+
+        CommandGroup(replacing: .help) {
+            Button("MDReader Help") { open("https://github.com/rboundi/mdreader#readme") }
+            Button("Keyboard Shortcuts") { open("https://github.com/rboundi/mdreader#keyboard-shortcuts") }
+            Divider()
+            Button("Report an Issue") { open("https://github.com/rboundi/mdreader/issues") }
         }
     }
 }

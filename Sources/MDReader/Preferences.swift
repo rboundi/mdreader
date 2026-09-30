@@ -64,6 +64,8 @@ enum Prefs {
     static let wrapCode = "wrapCode"
     static let numberHeadings = "numberHeadings"
     static let followEdits = "followEdits"
+    static let lineNumbers = "lineNumbers"
+    static let searchScope = "searchScope"
 
     static var defaultPDFFolder: String {
         FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first?.path
@@ -102,6 +104,7 @@ enum Prefs {
             wrapCode: false,
             numberHeadings: false,
             followEdits: true,
+            lineNumbers: false,
         ])
     }
 
@@ -174,5 +177,13 @@ enum Palette {
         return appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             ? NSColor(srgbRed: 0x1c / 255, green: 0x1c / 255, blue: 0x1e / 255, alpha: 1)
             : NSColor.white
+    }
+
+    /// Tab bar, sidebar and toolbar: the system window color, or a darker sepia.
+    static let chrome = NSColor(name: nil) { _ in
+        if Prefs.appearanceMode == .sepia {
+            return NSColor(srgbRed: 0xEC / 255, green: 0xE2 / 255, blue: 0xCF / 255, alpha: 1)
+        }
+        return .windowBackgroundColor
     }
 }

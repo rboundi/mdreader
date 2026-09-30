@@ -77,6 +77,15 @@
 
   function scrollToAnchor(id, smooth) {
     if (!id) return false;
+    // Outline entries in source view point at the heading's line.
+    const sourceIndex = current.source && /^source-(\d+)$/.exec(id);
+    if (sourceIndex) {
+      const heading = sourceHeadings(current.md)[Number(sourceIndex[1])];
+      const y = heading && sourceOffsetY(heading.offset);
+      if (y == null) return false;
+      window.scrollTo({ top: Math.max(0, y - 12), behavior: smooth ? "smooth" : "auto" });
+      return true;
+    }
     const target = anchorTarget(id);
     if (target) reveal(target);
     target?.scrollIntoView?.({ behavior: smooth ? "smooth" : "auto", block: "start" });
@@ -326,6 +335,15 @@
     const blocks = [...root.querySelectorAll(".mermaid-block")];
     if (!blocks.length) return;
     await loadScript("vendor/mermaid.tiny.js");
+    if (typeof mermaid === "undefined") {
+      // The bundled Mermaid needs the WebKit in macOS 13.3 or later.
+      for (const block of blocks) {
+        if (block.querySelector(".diagram-error")) continue;
+        block.classList.add("failed");
+        block.insertAdjacentHTML("beforeend", '<p class="diagram-error">Diagrams need macOS 13.3 or later.</p>');
+      }
+      return;
+    }
     theme = theme || (prefersDark() ? "dark" : "default");
     if (theme !== diagramTheme) {
       mermaid.initialize({
@@ -379,31 +397,41 @@
   }
 
   function sendOutline() {
-    const items = headings().map((h) => ({
-      id: h.id, level: Number(h.tagName[1]),
-      text: (h.dataset.num ? h.dataset.num + " " : "") + h.textContent.trim(),
-    }));
+    const items = current.source
+      ? sourceHeadings(current.md).map((h, i) => ({ id: "source-" + i, level: h.level, text: h.text }))
+        .filter((h) => h.level <= 4)
+      : headings().map((h) => ({
+        id: h.id, level: Number(h.tagName[1]),
+        text: (h.dataset.num ? h.dataset.num + " " : "") + h.textContent.trim(),
+      }));
     activeHeading = null;
     post({ type: "outline", items });
     updateActive();
   }
 
   function updateActive() {
-    let current = null;
-    const all = headings().filter((h) => !h.classList.contains("folded-away"));
+    let active = null;
+    // [id, top relative to the window] of each outline heading.
+    const stops = current.source ? headingStops() : [];
+    const all = current.source
+      ? sourceHeadings(current.md).map((h, i) => [h, i, stops[i]])
+        .filter(([h, , y]) => h.level <= 4 && y !== undefined)
+        .map(([, i, y]) => ["source-" + i, y + 12 - window.scrollY])
+      : headings().filter((h) => !h.classList.contains("folded-away"))
+        .map((h) => [h.id, h.getBoundingClientRect().top]);
     const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
     if (atBottom && window.scrollY > 0 && all.length) {
       // Short final sections never reach the top of the window; count them once we're at the end.
-      current = all[all.length - 1].id;
+      active = all[all.length - 1][0];
     } else {
-      for (const h of all) {
-        if (h.getBoundingClientRect().top <= 90) current = h.id;
+      for (const [id, top] of all) {
+        if (top <= 90) active = id;
         else break;
       }
     }
-    if (current !== activeHeading) {
-      activeHeading = current;
-      post({ type: "active", id: current || "" });
+    if (active !== activeHeading) {
+      activeHeading = active;
+      post({ type: "active", id: active || "" });
     }
   }
 
@@ -456,11 +484,10 @@
       content.className = "source-view";
       const pre = document.createElement("pre");
       const code = document.createElement("code");
-      if (p.md.length < 400000) {
-        code.innerHTML = hljs.highlight(p.md, { language: "markdown", ignoreIllegals: true }).value;
-      } else {
-        code.textContent = p.md;
-      }
+      const html = p.md.length < 400000
+        ? hljs.highlight(p.md, { language: "markdown", ignoreIllegals: true }).value
+        : escapeHTML(p.md);
+      code.innerHTML = splitLines(html).map((line) => `<span class="line">${line}</span>`).join("");
       pre.append(code);
       content.replaceChildren(pre);
     } else {
@@ -581,6 +608,28 @@
     }
   }
 
+  // Splits highlighted HTML into lines, closing and reopening the highlight spans at each line
+  // break. Each line keeps its "\n", so character offsets in the source stay the same.
+  function splitLines(html) {
+    const lines = [];
+    const open = [];
+    let line = "";
+    for (const [, tag, close, text] of html.matchAll(/(<span[^>]*>)|(<\/span>)|([^<]+)/g)) {
+      if (tag) { open.push(tag); line += tag; continue; }
+      if (close) { open.pop(); line += close; continue; }
+      const parts = text.split("\n");
+      parts.forEach((part, i) => {
+        line += part;
+        if (i < parts.length - 1) {
+          lines.push(line + "\n" + "</span>".repeat(open.length));
+          line = open.join("");
+        }
+      });
+    }
+    if (line.replace(/<[^>]*>/g, "")) lines.push(line);
+    return lines;
+  }
+
   function imagesLoaded(images, timeout) {
     if (!images.length) return Promise.resolve();
     const all = Promise.all(images.map((img) => new Promise((resolve) => {
@@ -641,7 +690,7 @@
   }
 
   // `scroll` is false when searching again after the page re-rendered, so the reader stays put.
-  function find(query, scroll = true) {
+  function find(query, scroll = true, index = 0) {
     clearFind();
     if (!query) return status();
     const needle = query.toLowerCase();
@@ -670,9 +719,9 @@
       node.replaceWith(frag);
     }
     if (found.marks.length) {
-      found.index = 0;
+      found.index = Math.min(Math.max(0, index), found.marks.length - 1);
       if (scroll) focusMatch();
-      else found.marks[0].classList.add("current");
+      else found.marks[found.index].classList.add("current");
     }
     return status();
   }
@@ -689,8 +738,9 @@
 
   // Rendered HTML without reader UI, with image URLs made absolute.
   async function exportHTML() {
-    await lastRender;
+    await preparePrint();  // light diagrams, like the PDF
     const clone = content.cloneNode(true);
+    await afterPrint();
     clone.querySelectorAll(".copy-btn, .fold, .front-matter").forEach((el) => el.remove());
     clone.querySelectorAll(".folded-away, .collapsed").forEach((el) => el.classList.remove("folded-away", "collapsed"));
     clone.querySelectorAll("mark.mdr-find").forEach((m) => m.replaceWith(m.textContent));
@@ -869,15 +919,28 @@
   const topHeadings = () => [...content.children].filter((el) => headingLevel(el));
 
   // Character offset in the Markdown of every top-level heading, in document order.
-  function headingOffsets(md) {
+  // Every Markdown heading in the source: character offset, level and plain text. Cached per text.
+  let headingCache = { md: null, list: [] };
+
+  function sourceHeadings(md) {
+    if (headingCache.md === md) return headingCache.list;
     const [, body] = splitFrontMatter(md);
     let pos = md.length - body.length;
-    const offsets = [];
+    const list = [];
+    const scratch = document.createElement("template");
     for (const token of placeLexer.lexer(body)) {
-      if (token.type === "heading") offsets.push(pos);
+      if (token.type === "heading") {
+        scratch.innerHTML = placeLexer.parseInline(token.text);
+        list.push({ offset: pos, level: token.depth, text: scratch.content.textContent.trim() });
+      }
       pos += token.raw.length;
     }
-    return offsets;
+    headingCache = { md, list };
+    return list;
+  }
+
+  function headingOffsets(md) {
+    return sourceHeadings(md).map((h) => h.offset);
   }
 
   const maxScroll = () => Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
@@ -1048,8 +1111,10 @@
   const options = { numbers: false, followEdits: true };
 
   function setOptions(o) {
+    sourceStops = null;  // widths and fonts move the source lines
     if (o.font) document.body.dataset.font = o.font;
     if (o.wrap !== undefined) document.body.classList.toggle("wrap-code", !!o.wrap);
+    if (o.lineNumbers !== undefined) document.body.classList.toggle("line-numbers", !!o.lineNumbers);
     if (o.followEdits !== undefined) options.followEdits = !!o.followEdits;
     if (o.numbers !== undefined && !!o.numbers !== options.numbers) {
       options.numbers = !!o.numbers;

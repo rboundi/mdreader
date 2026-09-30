@@ -1,14 +1,16 @@
 import SwiftUI
 
-/// Left sidebar: the document outline, or the Markdown files in the same folder.
+/// Left sidebar: the document outline, the Markdown files in the same folder, or search.
 struct SidebarView: View {
     @EnvironmentObject private var state: AppState
+    @AppStorage(Prefs.appearance) private var appearance = AppearanceMode.system.rawValue
 
     var body: some View {
         VStack(spacing: 0) {
             Picker("", selection: $state.sidebarPane) {
                 Text("Outline").tag(SidebarPane.outline)
                 Text("Files").tag(SidebarPane.files)
+                Text("Search").tag(SidebarPane.search)
             }
             .pickerStyle(.segmented)
             .labelsHidden()
@@ -19,11 +21,12 @@ struct SidebarView: View {
             switch state.sidebarPane {
             case .outline: OutlineView()
             case .files: FilesView()
+            case .search: SearchView(model: state.search)
             }
         }
         .frame(width: 230)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Color(nsColor: Palette.chrome))
     }
 }
 

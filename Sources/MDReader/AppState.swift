@@ -2,7 +2,14 @@ import AppKit
 import UniformTypeIdentifiers
 
 enum SidebarPane: String {
-    case outline, files
+    case outline, files, search
+}
+
+/// Asks the find bar to search for `query` and select its `index`th match.
+struct FindRequest: Equatable {
+    let id = UUID()
+    let query: String
+    let index: Int
 }
 
 struct Toast: Equatable {
@@ -31,6 +38,7 @@ final class AppState: ObservableObject {
     @Published private(set) var recents: [URL] = []
     @Published var toast: Toast?
     @Published var findVisible = false
+    @Published var findRequest: FindRequest?
     @Published private(set) var outline: [OutlineItem] = []
     @Published private(set) var activeHeading: String?
     @Published var sidebarVisible = UserDefaults.standard.bool(forKey: Prefs.outlineVisible) {
@@ -53,6 +61,7 @@ final class AppState: ObservableObject {
     @Published private(set) var renderGeneration = 0
 
     let reader = ReaderController()
+    let search = SearchModel()
 
     private struct Position {
         let url: URL
@@ -102,10 +111,11 @@ final class AppState: ObservableObject {
         // New tabs go right after the current one, in the order they were given.
         var insertAt = selectedIndex.map { $0 + 1 } ?? tabs.count
         var skipped: [String] = []
+        var tooLarge: [String] = []
         var missing: [String] = []
         var emptyFolders: [String] = []
         for raw in urls {
-            var url = raw.standardizedFileURL
+            var url = MarkdownFiles.canonical(raw)
             if url.hasDirectoryPath || (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
                 guard let first = Self.mainDocument(in: url) else {
                     emptyFolders.append(url.lastPathComponent)
@@ -117,7 +127,9 @@ final class AppState: ObservableObject {
                 sidebarVisible = true
             }
             guard MarkdownFiles.canOpen(url) else {
-                if FileManager.default.fileExists(atPath: url.path) {
+                if MarkdownFiles.isTooLarge(url) {
+                    tooLarge.append(url.lastPathComponent)
+                } else if FileManager.default.fileExists(atPath: url.path) {
                     skipped.append(url.lastPathComponent)
                 } else {
                     missing.append(url.lastPathComponent)
@@ -127,7 +139,16 @@ final class AppState: ObservableObject {
             if let existing = tabs.first(where: { $0.url == url }) {
                 lastID = existing.id
                 if let anchor, !anchor.isEmpty {
-                    if existing.id == selectedID { reader.scrollToAnchor(anchor) } else { existing.pendingAnchor = anchor }
+                    if existing.showSource {
+                        // Heading anchors only exist in the rendered view.
+                        existing.showSource = false
+                        existing.pendingAnchor = anchor
+                        if existing.id == selectedID { reader.display(existing) }
+                    } else if existing.id == selectedID {
+                        reader.scrollToAnchor(anchor)
+                    } else {
+                        existing.pendingAnchor = anchor
+                    }
                 } else if let scroll {
                     if existing.showSource {
                         existing.showSource = false
@@ -156,7 +177,9 @@ final class AppState: ObservableObject {
         }
         if let lastID { selectedID = lastID }
         persistTabs()
-        if !skipped.isEmpty {
+        if !tooLarge.isEmpty {
+            show(Toast(message: "Can't open \(tooLarge.joined(separator: ", ")): larger than 20 MB"))
+        } else if !skipped.isEmpty {
             show(Toast(message: "Can't open \(skipped.joined(separator: ", ")): not a text file"))
         } else if !missing.isEmpty, !restoring {
             show(Toast(message: "\(missing.joined(separator: ", ")) not found"))
@@ -167,9 +190,7 @@ final class AppState: ObservableObject {
 
     /// README, then index, then the first Markdown file by name.
     private static func mainDocument(in folder: URL) -> URL? {
-        let files = ((try? FileManager.default.contentsOfDirectory(
-            at: folder, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? [])
-            .filter(MarkdownFiles.isMarkdownDocument)
+        let files = markdownFiles(in: MarkdownFiles.canonical(folder))
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
         for name in ["readme", "index"] {
             if let match = files.first(where: { $0.deletingPathExtension().lastPathComponent.lowercased() == name }) {
@@ -386,7 +407,6 @@ final class AppState: ObservableObject {
     }
 
     func scrollToHeading(_ id: String) {
-        if selected?.showSource == true { toggleSource() }
         recordPosition()
         reader.scrollToAnchor(id)
     }
@@ -400,6 +420,33 @@ final class AppState: ObservableObject {
         let anchor = id.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed) ?? id
         NSPasteboard.general.setString("\(name)#\(anchor)", forType: .string)
         show(Toast(message: "Link copied"))
+    }
+
+    // MARK: Search
+
+    /// The last search in the find bar, filled in again when it reopens.
+    var lastFindQuery = ""
+
+    /// Opens the find bar; `step` also moves to the next (1) or previous (-1) match.
+    func showFind(step: Int? = nil) {
+        findVisible = true
+        // After the bar exists, so it receives this.
+        DispatchQueue.main.async { NotificationCenter.default.post(name: .findNext, object: step) }
+    }
+
+    /// Shows the Search pane and puts the cursor in its field.
+    func showSearch() {
+        focusMode = false
+        sidebarPane = .search
+        sidebarVisible = true
+        search.focusToken = UUID()
+    }
+
+    /// Opens a file from the search results and selects the match with Find.
+    func openSearchResult(_ url: URL, query: String, occurrence: Int) {
+        open([url])
+        findRequest = FindRequest(query: query, index: occurrence)
+        findVisible = true
     }
 
     // MARK: Back & Forward
@@ -459,12 +506,21 @@ final class AppState: ObservableObject {
 
     private func listFolder() {
         guard let folder = watchedFolder else { return }
-        let items = (try? FileManager.default.contentsOfDirectory(
-            at: folder, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
-        let files = items.filter(MarkdownFiles.isMarkdownDocument)
-            .map(\.standardizedFileURL)
-            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+        let files = Self.markdownFiles(in: folder)
         if files != folderFiles { folderFiles = files }
+        // A file that was deleted and has come back (for example after switching git branches).
+        for tab in tabs where tab.error != nil && tab.url.deletingLastPathComponent() == folder {
+            if FileManager.default.fileExists(atPath: tab.url.path) { tab.reload() }
+        }
+    }
+
+    /// Markdown files in a folder, sorted by name. Works when the folder path is a symlink.
+    private static func markdownFiles(in folder: URL) -> [URL] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+        return names.filter { !$0.hasPrefix(".") }
+            .map { folder.appendingPathComponent($0).standardizedFileURL }
+            .filter(MarkdownFiles.isMarkdownDocument)
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
     }
 
     /// Open tabs first, then recent files, then the rest of the current folder.
@@ -590,7 +646,7 @@ final class AppState: ObservableObject {
         let literal = script.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         let source = """
-            do shell script "mkdir -p /usr/local/bin && cp " & quoted form of "\(literal)" & " /usr/local/bin/mdr && chmod 755 /usr/local/bin/mdr" with administrator privileges
+            do shell script "mkdir -p /usr/local/bin && rm -f /usr/local/bin/mdr && cp " & quoted form of "\(literal)" & " /usr/local/bin/mdr && chmod 755 /usr/local/bin/mdr" with administrator privileges
             """
         var error: NSDictionary?
         NSAppleScript(source: source)?.executeAndReturnError(&error)

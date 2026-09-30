@@ -279,7 +279,7 @@ pre:hover .copy-btn { opacity: 1; }
 .markdown-body table { border-collapse: collapse; margin: 0; font-size: 0.94em; }
 .markdown-body :is(th, td) { padding: 7px 13px; border: 1px solid var(--border); }
 .markdown-body th { font-weight: 600; background: var(--surface); }
-.markdown-body tr:nth-child(2n) td { background: color-mix(in srgb, var(--surface) 55%, transparent); }
+.markdown-body tr:nth-child(2n) td { background: rgba(128, 128, 128, 0.06); background: color-mix(in srgb, var(--surface) 55%, transparent); }
 
 /* ---------- alerts ---------- */
 
@@ -303,6 +303,19 @@ pre:hover .copy-btn { opacity: 1; }
   word-wrap: break-word;
 }
 #content.source-view { max-width: max(var(--content-width, 860px), 960px); }
+.source-view code .line { display: block; min-height: 1.6em; }
+body.line-numbers .source-view pre { counter-reset: line; }
+body.line-numbers .source-view code .line { position: relative; padding-left: 3.4em; }
+body.line-numbers .source-view code .line::before {
+  counter-increment: line;
+  content: counter(line);
+  position: absolute;
+  left: 0;
+  width: 2.6em;
+  text-align: right;
+  color: var(--muted);
+  opacity: 0.6;
+}
 
 /* ---------- syntax highlighting ---------- */
 
@@ -317,8 +330,8 @@ pre:hover .copy-btn { opacity: 1; }
 .hljs-section { font-weight: 650; }
 .hljs-strong { font-weight: 650; }
 .hljs-emphasis { font-style: italic; }
-.hljs-addition { background: color-mix(in srgb, var(--tip) 12%, transparent); }
-.hljs-deletion { background: color-mix(in srgb, var(--caution) 12%, transparent); }
+.hljs-addition { background: rgba(46, 160, 67, 0.12); background: color-mix(in srgb, var(--tip) 12%, transparent); }
+.hljs-deletion { background: rgba(248, 81, 73, 0.12); background: color-mix(in srgb, var(--caution) 12%, transparent); }
 
 /* ---------- footnotes ---------- */
 
@@ -372,6 +385,7 @@ pre:hover .copy-btn { opacity: 1; }
   align-items: center;
   justify-content: center;
   padding: 24px;
+  background: var(--bg);  /* before macOS 13.1 */
   background: color-mix(in srgb, var(--bg) 88%, transparent);
   cursor: zoom-out;
 }
@@ -415,7 +429,7 @@ mark.mdr-find.current { background: var(--mark-current); color: #000; }
   body { font-size: 11.5pt; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   #content { max-width: none; padding: 0; }
   .copy-btn, .fold, .front-matter, #progress, .lightbox, .footnote-tip { display: none !important; }
-  mark.mdr-find { background: none; }
+  mark.mdr-find, mark.mdr-find.current { background: none; color: inherit; }
   .markdown-body pre, .source-view pre { white-space: pre-wrap; word-wrap: break-word; overflow: visible; }
   .markdown-body .table-wrap { overflow: visible; }
   .markdown-body :is(h1, h2, h3, h4, h5, h6) { break-after: avoid; }

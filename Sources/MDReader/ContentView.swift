@@ -5,6 +5,7 @@ struct ContentView: View {
     @EnvironmentObject private var state: AppState
     // Redraw page-coloured chrome when switching between Light and Sepia (same system appearance).
     @AppStorage(Prefs.appearance) private var appearance = AppearanceMode.system.rawValue
+    @AppStorage(Prefs.checkForUpdates) private var checkForUpdates = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -43,6 +44,8 @@ struct ContentView: View {
         .navigationSubtitle(subtitle)
         .toolbar { toolbar }
         .toolbar(state.focusMode ? .hidden : .visible, for: .windowToolbar)
+        .toolbarBackground(Color(nsColor: Palette.chrome), for: .windowToolbar)
+        .toolbarBackground(appearance == AppearanceMode.sepia.rawValue ? .visible : .automatic, for: .windowToolbar)
         .animation(.easeOut(duration: 0.18), value: state.focusMode)
     }
 
@@ -83,7 +86,7 @@ struct ContentView: View {
             .disabled(state.selected == nil)
         }
         ToolbarItemGroup(placement: .primaryAction) {
-            if let update = state.availableUpdate {
+            if let update = state.availableUpdate, checkForUpdates {
                 Button {
                     NSWorkspace.shared.open(update.url)
                 } label: {
@@ -106,6 +109,18 @@ struct ContentView: View {
                     systemImage: showingSource ? "doc.richtext" : "chevron.left.forwardslash.chevron.right")
             }
             .help(showingSource ? "Show rendered view (⌘/)" : "Show Markdown source (⌘/)")
+            .disabled(state.selected == nil)
+
+            Menu {
+                Button("Find in Document") { state.showFind() }
+                Button("Search Open Tabs") { state.search.scope = .tabs; state.showSearch() }
+                Button("Search This Folder") { state.search.scope = .folder; state.showSearch() }
+            } label: {
+                Label("Search", systemImage: "magnifyingglass")
+            } primaryAction: {
+                state.showFind()
+            }
+            .help("Find (⌘F). Click and hold to search open tabs or the folder.")
             .disabled(state.selected == nil)
 
             Button {
@@ -240,6 +255,9 @@ struct FindBar: View {
     @State private var current = 0
     @State private var total = 0
     @FocusState private var focused: Bool
+    /// Set while a search result is shown, so the query change and re-render don't reset the match.
+    @State private var requestedQuery: String?
+    @State private var requestGeneration = -1
 
     var body: some View {
         HStack(spacing: 6) {
@@ -250,6 +268,8 @@ struct FindBar: View {
                 .focused($focused)
                 .onSubmit { step(NSEvent.modifierFlags.contains(.shift) ? -1 : 1) }
                 .onChange(of: query) { q in
+                    state.lastFindQuery = q
+                    if q == requestedQuery { return requestedQuery = nil }
                     state.reader.find(q) { c, t in current = c; total = t }
                 }
             Text(query.isEmpty ? "" : total == 0 ? "No results" : "\(current) of \(total)")
@@ -269,15 +289,33 @@ struct FindBar: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.separator))
         .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
-        .onAppear { focused = true }
+        .onAppear {
+            if state.findRequest != nil {
+                apply(state.findRequest)
+            } else {
+                focused = true
+                if query.isEmpty { query = state.lastFindQuery }
+            }
+        }
+        .onChange(of: state.findRequest) { apply($0) }
         .onReceive(NotificationCenter.default.publisher(for: .findNext)) { note in
             focused = true
             if let dir = note.object as? Int { step(dir) }
         }
-        .onChange(of: state.renderGeneration) { _ in
+        .onChange(of: state.renderGeneration) { generation in
             // The page was re-rendered (tab switch, reload, source toggle); search the new content.
+            guard generation != requestGeneration else { return }
             state.reader.find(query, scroll: false) { c, t in current = c; total = t }
         }
+    }
+
+    private func apply(_ request: FindRequest?) {
+        guard let request else { return }
+        state.findRequest = nil
+        requestGeneration = state.renderGeneration
+        if query != request.query { requestedQuery = request.query }
+        query = request.query
+        state.reader.find(request.query, index: request.index) { c, t in current = c; total = t }
     }
 
     private func step(_ direction: Int) {

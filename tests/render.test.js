@@ -168,12 +168,17 @@ test("posts the outline to the app", () => {
   same(outline.items.map((i) => [i.level, i.text]), [[1, "One"], [2, "Two"], [4, "Four"]]);
 });
 
-test("source view shows the raw Markdown and no outline", () => {
+test("source view shows the raw Markdown, one element per line, with an outline", () => {
   const { render, messages } = setup();
-  const c = render("# Title\n\n*x*", { source: true });
+  const md = "---\ntitle: T\n---\n# Title **bold**\n\n```\ncode\n# not a heading\n```\n\n## Next\n\n##### Deep";
+  const c = render(md, { source: true });
   assert.equal(c.className, "source-view");
-  assert.equal(c.textContent, "# Title\n\n*x*");
-  same(messages.findLast((m) => m.type === "outline").items, []);
+  assert.equal(c.textContent, md);
+  assert.equal(c.querySelectorAll(".line").length, md.split("\n").length);
+  same(messages.findLast((m) => m.type === "outline").items, [
+    { id: "source-0", level: 1, text: "Title bold" },
+    { id: "source-1", level: 2, text: "Next" },
+  ]);
 });
 
 test("find highlights matches and steps through them", () => {

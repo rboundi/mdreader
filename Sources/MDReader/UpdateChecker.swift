@@ -44,23 +44,26 @@ enum UpdateChecker {
     }
 
     static func check(completion: @escaping (Result) -> Void) {
-        guard let api = URL(string: "https://api.github.com/repos/\(repo)/releases/latest") else { return }
-        var request = URLRequest(url: api, timeoutInterval: 15)
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        // github.com/…/releases/latest redirects to the newest release's tag page. Unlike the REST API,
+        // it isn't limited to 60 requests an hour per network.
+        guard let latest = URL(string: "https://github.com/\(repo)/releases/latest") else { return }
+        var request = URLRequest(url: latest, timeoutInterval: 15)
+        request.httpMethod = "HEAD"
         request.setValue("MDReader/\(currentVersion)", forHTTPHeaderField: "User-Agent")
-        URLSession.shared.dataTask(with: request) { data, response, error in
+        URLSession.shared.dataTask(with: request) { _, response, error in
             let result: Result
-            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            if status == 404 {
-                result = .upToDate  // no releases published yet
-            } else if let data, status == 200,
-                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                let tag = json["tag_name"] as? String,
-                let page = (json["html_url"] as? String).flatMap(URL.init(string:))
-            {
-                let version = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
-                result = isNewer(version, than: currentVersion)
-                    ? .available(Release(version: version, url: page)) : .upToDate
+            let http = response as? HTTPURLResponse
+            let status = http?.statusCode ?? 0
+            if status == 200, let page = http?.url {
+                let parts = page.pathComponents
+                if let i = parts.firstIndex(of: "tag"), i > 0, parts[i - 1] == "releases", i + 1 < parts.count {
+                    let tag = parts[i + 1]
+                    let version = tag.hasPrefix("v") ? String(tag.dropFirst()) : tag
+                    result = isNewer(version, than: currentVersion)
+                        ? .available(Release(version: version, url: page)) : .upToDate
+                } else {
+                    result = .upToDate  // no releases published yet
+                }
             } else {
                 result = .failed(error?.localizedDescription ?? "GitHub returned status \(status).")
             }
