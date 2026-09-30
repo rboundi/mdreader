@@ -367,7 +367,9 @@ enum MarkdownFiles {
     static let maxFileSize = 20 * 1024 * 1024
 
     /// Markdown or any other plain-text file (README, LICENSE, .rst…) up to 20 MB.
-    static func canOpen(_ url: URL) -> Bool {
+    static func canOpen(_ link: URL) -> Bool {
+        // Check the file a symlink points to, not the link itself.
+        let url = link.resolvingSymlinksInPath()
         guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
             values.isRegularFile == true, (values.fileSize ?? 0) <= maxFileSize
         else { return false }
