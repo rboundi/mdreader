@@ -38,7 +38,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN_DIR/MDReader" "$APP/Contents/MacOS/MDReader"
 strip -x "$APP/Contents/MacOS/MDReader"
 sed -e "s/__VERSION__/$VERSION/" -e "s/__BUILD__/$BUILD/" Resources/Info.plist > "$APP/Contents/Info.plist"
-# AppIcon.icns is the flat icon for macOS 13–15; Assets.car holds the layered one for macOS 26+.
+# Assets.car holds the layered icon for macOS 26+ and flat ones for macOS 13–15; AppIcon.icns has the small sizes.
 cp Resources/AppIcon.icns Resources/Assets.car "$APP/Contents/Resources/"
 cp Resources/mdr "$APP/Contents/Resources/mdr"
 chmod +x "$APP/Contents/Resources/mdr"
