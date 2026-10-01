@@ -32,12 +32,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidBecomeActive(_ notification: Notification) {
         // Picks up a custom.css created (or recreated) while MDReader was in the background.
-        MainActor.assumeIsolated { AppState.shared.reader.watchCustomCSS() }
+        MainActor.assumeIsolated {
+            AppState.shared.reader.watchCustomCSS()
+            AppState.shared.findNeutrino()
+        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         MainActor.assumeIsolated {
             AppState.shared.checkForUpdatesInBackground()
+            AppState.shared.findNeutrino()
             AppState.shared.removeOldClipboardFiles()
         }
         // Mouse side buttons go Back and Forward.
@@ -179,7 +183,7 @@ struct AppCommands: Commands {
                 }
                 .keyboardShortcut("o", modifiers: [.command, .option])
                 .disabled(state.selected == nil)
-                if state.neutrinoURL != nil, state.editorName != "Neutrino" {
+                if let neutrino = state.neutrinoURL, state.editorURL?.standardizedFileURL != neutrino.standardizedFileURL {
                     Button("Edit in Neutrino") { state.editInNeutrino() }
                         .disabled(state.selected == nil || state.selected?.isUntitled == true)
                 }

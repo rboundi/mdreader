@@ -38,6 +38,7 @@ struct SettingsView: View {
             page { export }.tabItem { Label("Export", systemImage: "arrow.down.doc") }
         }
         .frame(width: 480)
+        .onAppear { AppState.shared.findNeutrino() }
     }
 
     private func page<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {

@@ -146,7 +146,10 @@ final class AppState: ObservableObject {
         editor.onDirtyChange = { [weak self] in self?.objectWillChange.send() }
         reader.onProgress = { [weak self] progress in self?.updateTimeLeft(progress) }
         reader.diagramsInUse = { [weak self] in
-            self?.tabs.contains { $0.displayText.contains("```mermaid") || $0.displayText.contains("~~~mermaid") } ?? false
+            // A fence followed by "mermaid", with or without a space between.
+            self?.tabs.contains {
+                $0.displayText.range(of: #"(```|~~~)[ \t]*mermaid"#, options: .regularExpression) != nil
+            } ?? false
         }
         reader.onSelectionWords = { [weak self] words in self?.setSelectionWords(words) }
         editor.onSelectionWords = { [weak self] words in self?.setSelectionWords(words) }
@@ -623,8 +626,12 @@ final class AppState: ObservableObject {
 
     /// Neutrino, the code editor suggested for more than quick edits, if it's installed.
     static let neutrinoPage = URL(string: "https://github.com/rboundi/neutrino")!
-    var neutrinoURL: URL? {
-        NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.movinapp.neutrino.macos")
+    @Published private(set) var neutrinoURL: URL?
+
+    /// Looked up at launch and whenever MDReader comes to the front, not on every menu update.
+    func findNeutrino() {
+        let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.movinapp.neutrino.macos")
+        if url != neutrinoURL { neutrinoURL = url }
     }
 
     func editInNeutrino() {

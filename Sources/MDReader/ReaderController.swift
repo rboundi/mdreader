@@ -104,6 +104,8 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
         if trim {
             mermaidLoaded = false
             ready = false
+            lightboxOpen = false
+            webView.canScrollHorizontally = false
             loadTemplate()
         }
         guard let tab else {
@@ -448,6 +450,8 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
         if let payload = pendingRender {
             pendingRender = nil
             send(payload)
+            // An open find bar searches the page again now that it's there.
+            onDisplay?()
         }
     }
 
