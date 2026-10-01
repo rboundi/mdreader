@@ -37,23 +37,45 @@ enum HTMLExport {
     /// Puts HTML (for Mail, Notes, Pages, Google Docs…), RTF and plain text on the clipboard.
     static func copyRichText(_ page: RenderedPage) {
         let html = "<meta charset=\"utf-8\">" + inlineImages(page)
-        // Converting to RTF downloads web images on the main thread, so leave them out of the RTF.
-        let offline = html.replacingOccurrences(
-            of: #"<img\b[^>]*\bsrc="https?:[^"]*"[^>]*>"#, with: "", options: [.regularExpression, .caseInsensitive])
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.declareTypes([.html, .rtf, .string], owner: nil)
         pb.setString(html, forType: .html)
-        if let data = offline.data(using: .utf8),
-            let attributed = try? NSAttributedString(
-                data: data,
-                options: [.documentType: NSAttributedString.DocumentType.html, .characterEncoding: String.Encoding.utf8.rawValue],
-                documentAttributes: nil),
+        if let attributed = attributedString(html),
             let rtf = attributed.rtf(from: NSRange(location: 0, length: attributed.length))
         {
             pb.setData(rtf, forType: .rtf)
         }
         pb.setString(page.text, forType: .string)
+    }
+
+    /// The page as a Word (.docx) or RTF document. macOS does the conversion.
+    static func document(for page: RenderedPage, as type: NSAttributedString.DocumentType) -> Data? {
+        // Without a stylesheet the converter falls back to Times; give it the reading fonts.
+        let style = """
+            <style>
+            body { font-family: -apple-system, "Helvetica Neue", sans-serif; font-size: 12pt; }
+            code, pre { font-family: Menlo, monospace; font-size: 10.5pt; }
+            th, td { border: 1px solid #999; padding: 3px 8px; }
+            </style>
+            """
+        guard let attributed = attributedString("<meta charset=\"utf-8\">" + style + inlineImages(page)) else {
+            return nil
+        }
+        return try? attributed.data(
+            from: NSRange(location: 0, length: attributed.length),
+            documentAttributes: [.documentType: type, .title: page.title])
+    }
+
+    private static func attributedString(_ html: String) -> NSAttributedString? {
+        // The converter downloads web images on the main thread, so leave them out.
+        let offline = html.replacingOccurrences(
+            of: #"<img\b[^>]*\bsrc="https?:[^"]*"[^>]*>"#, with: "", options: [.regularExpression, .caseInsensitive])
+        guard let data = offline.data(using: .utf8) else { return nil }
+        return try? NSAttributedString(
+            data: data,
+            options: [.documentType: NSAttributedString.DocumentType.html, .characterEncoding: String.Encoding.utf8.rawValue],
+            documentAttributes: nil)
     }
 
     private static func inlineImages(_ page: RenderedPage) -> String {

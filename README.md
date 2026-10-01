@@ -30,6 +30,8 @@
 - Collapsible sections, remembered per file. **View → Collapse All Sections**, or <kbd>⌥</kbd>-click an arrow to fold every section at that level
 - Click a table header to sort by that column
 - Right-click a diagram to copy it or save it as PNG or SVG
+- Click a task's checkbox to tick it in the file
+- <kbd>⌘</kbd>-click a link to open it in a background tab
 - Hover a link to see where it goes; links to other notes show a preview of the linked section
 - Right-click a table to copy it for Numbers or Excel, or as CSV
 - Right-click a formula to copy its LaTeX
@@ -60,6 +62,7 @@
 **Export**
 - PDF (<kbd>⌘</kbd><kbd>E</kbd>), saved to the Desktop by default, with page numbers and clickable links, in A4 or US Letter
 - HTML (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>E</kbd>), a single file with styles and images embedded
+- Word (.docx) and RTF, as text: images and diagrams are left out
 - Copy as Rich Text (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>C</kbd>) for Mail, Notes, Pages or Google Docs, or **Edit → Copy as HTML** for the HTML itself
 
 **Appearance**
@@ -70,6 +73,7 @@
 **Editing**
 - **Edit** (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>O</kbd>) switches to a text editor with the rendered page beside it; <kbd>⌘</kbd><kbd>S</kbd> saves
 - <kbd>⌘</kbd><kbd>B</kbd>, <kbd>⌘</kbd><kbd>I</kbd> and <kbd>⌘</kbd><kbd>K</kbd> for bold, italic and links; lists continue when you press Return
+- <kbd>Tab</kbd> and <kbd>⇧</kbd><kbd>Tab</kbd> indent and outdent list items; pasting a web address over selected text makes a link
 - **New Document** (<kbd>⌘</kbd><kbd>N</kbd>)
 - To edit in another app instead, choose it in **Settings → Editing → Edit with**. Changes show as soon as you save
 

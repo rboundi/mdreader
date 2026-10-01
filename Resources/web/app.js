@@ -405,7 +405,11 @@
 
     // Task lists
     root.querySelectorAll("li input[type=checkbox]").forEach((cb) => {
-      cb.disabled = true;
+      // Markdown tasks (marked writes them disabled) can be ticked; clicking one updates the file.
+      // A checkbox written as raw HTML isn't a task and stays inert.
+      // Footnotes are moved to the end of the page, out of file order, so their tasks stay inert too.
+      cb.classList.toggle("task-box", cb.disabled && !cb.closest(".footnotes, [data-footnotes]"));
+      cb.disabled = !cb.classList.contains("task-box");
       cb.closest("li").classList.add("task-item");
       cb.closest("ul, ol")?.classList.add("task-list");
     });
@@ -560,6 +564,7 @@
   // ---------- render ----------
 
   let renderToken = 0;
+  let tickedTask = false;
   let lastRender = Promise.resolve();
 
   function restoreScroll(y) {
@@ -579,7 +584,9 @@
     sourceStops = null;
     const reloaded = p.scroll < 0 && current.doc === docKey && current.source === !!p.source
       && current.md !== (p.md || "");
-    const before = reloaded ? { md: current.md, blocks: current.blocks } : null;
+    // A task the reader just ticked isn't an edit to jump to.
+    const before = reloaded && !tickedTask ? { md: current.md, blocks: current.blocks } : null;
+    tickedTask = false;
     clearFind();
     closeLightbox();
     hideFootnote();
@@ -1077,11 +1084,23 @@
   // ---------- export ----------
 
   // Rendered HTML without reader UI, with image URLs made absolute.
-  async function exportHTML() {
+  // `plain` is for Word and RTF, whose converter drops checkboxes, math markup and drawings:
+  // those become ☑/☐, the TeX source, and nothing.
+  async function exportHTML(plain) {
     await preparePrint();  // light diagrams, like the PDF
     const clone = content.cloneNode(true);
     await afterPrint();
+    if (plain) {
+      clone.querySelectorAll("input[type=checkbox]").forEach((box) => box.replaceWith(box.checked ? "☑" : "☐"));
+      clone.querySelectorAll(".math[data-tex]").forEach((el) => {
+        const code = document.createElement("code");
+        code.textContent = el.dataset.tex;
+        el.replaceChildren(code);
+      });
+      clone.querySelectorAll(".mermaid-block, svg").forEach((el) => el.remove());
+    }
     clone.querySelectorAll(".copy-btn, .fold, .anchor-link, .front-matter").forEach((el) => el.remove());
+    clone.querySelectorAll("input.task-box").forEach((box) => { box.disabled = true; });
     clone.querySelectorAll(".folded-away, .collapsed").forEach((el) => el.classList.remove("folded-away", "collapsed"));
     clone.querySelectorAll("mark.mdr-find").forEach((m) => m.replaceWith(m.textContent));
     clone.querySelectorAll(".broken, .just-edited").forEach((el) => el.classList.remove("broken", "just-edited"));
@@ -1554,6 +1573,7 @@
     footnoteTip.className = "footnote-tip";
     footnoteTip.innerHTML = note.innerHTML;
     footnoteTip.querySelectorAll("[data-footnote-backref]").forEach((a) => a.remove());
+    footnoteTip.querySelectorAll("input").forEach((input) => { input.disabled = true; });
     document.body.append(footnoteTip);
     const r = ref.getBoundingClientRect();
     const width = Math.min(420, window.innerWidth - 32);
@@ -1674,6 +1694,21 @@
       setTimeout(() => { btn.textContent = "Copy"; btn.classList.remove("done"); }, 1200);
       return;
     }
+    const box = e.target.closest?.("input.task-box");
+    if (box) {
+      // The app changes [ ] to [x] in the file; the reload then shows the new state.
+      // It gets every task's state (before this click) and first word, and only writes if the
+      // file's tasks match them one for one.
+      const boxes = [...content.querySelectorAll("input.task-box")];
+      const tasks = boxes.map((b) => ({
+        checked: b === box ? !b.checked : b.checked,
+        word: (b.closest("li")?.textContent.match(/[\p{L}\p{N}]+/u) || [""])[0],
+      }));
+      tickedTask = true;
+      setTimeout(() => { tickedTask = false; }, 2000);  // in case no reload follows
+      post({ type: "task", index: boxes.indexOf(box), tasks, doc: current.doc });
+      return;
+    }
     const fold = e.target.closest(".fold");
     if (fold) {
       toggleFold(fold.parentElement, e.altKey);
@@ -1704,7 +1739,8 @@
       scrollToAnchor(href.slice(1), true);
       return;
     }
-    post({ type: "link", href: a.href, y: window.scrollY });
+    // ⌘-click opens in the background.
+    post({ type: "link", href: a.href, y: window.scrollY, background: e.metaKey });
   });
 
   // Tell the app which heading was right-clicked, for "Copy Link to Heading".

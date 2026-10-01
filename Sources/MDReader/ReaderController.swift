@@ -8,7 +8,11 @@ import UniformTypeIdentifiers
 final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
     let webView: ReaderWebView
     /// A Markdown link was followed: file, heading id, and the scroll position being left.
-    var onOpenFile: ((URL, String?, Double?) -> Void)?
+    /// The last value is true for a ⌘-click: open in the background.
+    var onOpenFile: ((URL, String?, Double?, Bool) -> Void)?
+    /// A task checkbox was clicked: the document's path, the task's index, and every task the page
+    /// shows (state before the click, first word).
+    var onToggleTask: ((String, Int, [DocTab.ShownTask]) -> Void)?
     /// An in-page link was followed from this scroll position.
     var onNavigate: ((Double) -> Void)?
     /// A zoomed image is showing (Escape closes it rather than leaving focus mode).
@@ -400,8 +404,9 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
     // MARK: HTML export
 
     /// The rendered page as standalone HTML (images inlined, reader chrome removed).
-    func renderedHTML(completion: @escaping (RenderedPage?) -> Void) {
-        webView.callAsyncJavaScript("return await window.mdr.exportHTML()", arguments: [:], in: nil, in: .page) {
+    /// `plain` simplifies what Word and RTF can't hold (checkboxes, math markup, diagrams).
+    func renderedHTML(plain: Bool = false, completion: @escaping (RenderedPage?) -> Void) {
+        webView.callAsyncJavaScript("return await window.mdr.exportHTML(p)", arguments: ["p": plain], in: nil, in: .page) {
             result in
             guard case .success(let value) = result, let dict = value as? [String: Any],
                 let html = dict["html"] as? String
@@ -493,7 +498,14 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
             onActiveHeading?(id?.isEmpty == false ? id : nil)
         case "link":
             if let href = body["href"] as? String, let url = URL(string: href) {
-                handleLink(url, from: (body["y"] as? NSNumber)?.doubleValue)
+                handleLink(url, from: (body["y"] as? NSNumber)?.doubleValue, background: body["background"] as? Bool ?? false)
+            }
+        case "task":
+            if let index = (body["index"] as? NSNumber)?.intValue, let items = body["tasks"] as? [[String: Any]] {
+                let shown = items.map {
+                    DocTab.ShownTask(checked: $0["checked"] as? Bool ?? false, word: $0["word"] as? String ?? "")
+                }
+                onToggleTask?(body["doc"] as? String ?? "", index, shown)
             }
         case "anchor":
             if let y = body["y"] as? NSNumber { onNavigate?(y.doubleValue) }
@@ -575,7 +587,7 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
         }
     }
 
-    private func handleLink(_ url: URL, from y: Double? = nil) {
+    private func handleLink(_ url: URL, from y: Double? = nil, background: Bool = false) {
         if url.isFileURL {
             var clean = URLComponents(url: url, resolvingAgainstBaseURL: false)
             let fragment = clean?.fragment
@@ -583,7 +595,7 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
             clean?.query = nil
             guard let fileURL = clean?.url else { return }
             if MarkdownFiles.isMarkdown(fileURL) {
-                onOpenFile?(fileURL, fragment, y)
+                onOpenFile?(fileURL, fragment, y, background)
             } else if !FileManager.default.fileExists(atPath: fileURL.path) {
                 NSSound.beep()
             } else if MarkdownFiles.isSafeToOpen(fileURL) {
@@ -593,7 +605,9 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
                 NSWorkspace.shared.activateFileViewerSelecting([fileURL])
             }
         } else if let scheme = url.scheme?.lowercased(), ["http", "https", "mailto"].contains(scheme) {
-            NSWorkspace.shared.open(url)
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = !background
+            NSWorkspace.shared.open(url, configuration: configuration)
         }
     }
 }

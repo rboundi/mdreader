@@ -171,6 +171,8 @@ struct ContentView: View {
             Menu {
                 Button("Export as PDF…") { state.exportPDF() }
                 Button("Export as HTML…") { state.exportHTML() }
+                Button("Export as Word…") { state.exportDocument(word: true) }
+                Button("Export as RTF…") { state.exportDocument(word: false) }
                 Button("Copy as Rich Text") { state.copyRichText() }
                 Divider()
                 Button("Print…") { state.printDocument() }

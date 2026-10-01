@@ -115,10 +115,15 @@ final class AppState: ObservableObject {
     private init() {
         recents = (UserDefaults.standard.stringArray(forKey: Prefs.recentFiles) ?? [])
             .map { URL(fileURLWithPath: $0) }
-        reader.onOpenFile = { [weak self] url, anchor, y in
+        reader.onOpenFile = { [weak self] url, anchor, y, background in
             guard let self else { return }
-            if MarkdownFiles.canOpen(url.standardizedFileURL) { self.recordPosition(y: y) }
-            self.open([url], anchor: anchor)
+            // Back returns here after following a link, also for a ⌘-click that jumps within this file.
+            let sameFile = MarkdownFiles.canonical(url) == self.selected?.url
+            if !background || sameFile, MarkdownFiles.canOpen(url.standardizedFileURL) { self.recordPosition(y: y) }
+            self.open([url], anchor: anchor, activate: !background)
+        }
+        reader.onToggleTask = { [weak self] path, index, shown in
+            self?.toggleTask(index, shown: shown, path: path)
         }
         reader.onNavigate = { [weak self] y in self?.recordPosition(y: y) }
         reader.webView.onCopyHeadingLink = { [weak self] id in self?.copyLink(toHeading: id) }
@@ -166,7 +171,10 @@ final class AppState: ObservableObject {
 
     /// Opens files as tabs (or focuses them if already open). `anchor` jumps to a heading id.
     /// `scroll` restores a position (Back/Forward); otherwise new tabs reopen where you left the file.
-    func open(_ urls: [URL], remember: Bool = true, anchor: String? = nil, scroll: Double? = nil) {
+    /// `activate` false (⌘-click) opens tabs without switching to them.
+    func open(
+        _ urls: [URL], remember: Bool = true, anchor: String? = nil, scroll: Double? = nil, activate: Bool = true
+    ) {
         var lastID: UUID?
         // New tabs go right after the current one, in the order they were given.
         var insertAt = selectedIndex.map { $0 + 1 } ?? tabs.count
@@ -230,7 +238,7 @@ final class AppState: ObservableObject {
             }
             if remember { addRecent(url) }
         }
-        if let lastID { selectedID = lastID }
+        if let lastID, activate || selectedID == nil { selectedID = lastID }
         persistTabs()
         if !tooLarge.isEmpty {
             show(Toast(message: "Can't open \(tooLarge.joined(separator: ", ")): larger than 20 MB"))
@@ -647,6 +655,38 @@ final class AppState: ObservableObject {
         return true
     }
 
+    /// A task checkbox was clicked on the page: change [ ] to [x] (or back) in the file, or in
+    /// the editor's text while editing. Nothing is written unless the page and the file agree.
+    private func toggleTask(_ index: Int, shown: [DocTab.ShownTask], path: String) {
+        guard let tab = selected, tab.error == nil, tab.url.path == path else {
+            return reader.display(selected)  // puts the checkbox back
+        }
+        guard tab.editing || tab.canEdit else {
+            show(Toast(message: "Can't edit \(tab.fileName): its text encoding isn't supported"))
+            return reader.display(tab)
+        }
+        // Another app changed the file and the page hasn't caught up: show the new version instead.
+        if !tab.editing, tab.changedSinceLoad { return tab.reload() }
+        let source = tab.editing ? editor.textView.string : tab.text
+        guard let change = DocTab.togglingTask(index, shown: shown, in: source) else {
+            show(Toast(message: "Couldn't find that task in the file"))
+            return reader.display(tab)
+        }
+        if tab.editing {
+            editor.replaceText(in: change.mark, with: shown[index].checked ? " " : "x")
+            return
+        }
+        tab.draft = change.text
+        do {
+            try tab.save()
+        } catch {
+            tab.draft = nil
+            show(Toast(message: "Couldn't save \(tab.fileName): \(error.localizedDescription)"))
+        }
+        reader.display(tab)
+        objectWillChange.send()
+    }
+
     /// ⌘S
     func save() {
         guard let tab = selected, tab.isDirty else { return }
@@ -660,7 +700,7 @@ final class AppState: ObservableObject {
         if tab.changedSinceLoad {
             let alert = NSAlert()
             alert.messageText = "\(tab.fileName) changed on disk"
-            alert.informativeText = "It was changed by another app after you started editing. Save your version anyway?"
+            alert.informativeText = "Another app changed it. Save your version anyway?"
             alert.addButton(withTitle: "Save Anyway")
             alert.addButton(withTitle: "Cancel")
             if alert.runModal() != .alertFirstButtonReturn { return false }
@@ -1019,6 +1059,37 @@ final class AppState: ObservableObject {
                     self?.show(Toast(message: "Exported \(url.lastPathComponent) to \(folder)", revealURL: url))
                 } catch {
                     self?.show(Toast(message: "Couldn't export HTML: \(error.localizedDescription)"))
+                }
+            }
+        }
+    }
+
+    /// Export as Word (.docx) or RTF.
+    func exportDocument(word: Bool) {
+        guard let tab = selected, !tab.editing, let window = reader.webView.window else { return }
+        ensureRendered()
+        reader.renderedHTML(plain: true) { [weak self] page in
+            guard let self else { return }
+            guard let page else { return self.show(Toast(message: "Couldn't export")) }
+            let panel = NSSavePanel()
+            panel.allowedContentTypes = [
+                word ? (UTType("org.openxmlformats.wordprocessingml.document") ?? .data) : .rtf
+            ]
+            panel.directoryURL = URL(
+                fileURLWithPath: UserDefaults.standard.string(forKey: Prefs.pdfFolder) ?? Prefs.defaultPDFFolder)
+            panel.nameFieldStringValue = tab.url.deletingPathExtension().lastPathComponent + (word ? ".docx" : ".rtf")
+            panel.canCreateDirectories = true
+            panel.beginSheetModal(for: window) { [weak self] response in
+                guard response == .OK, let url = panel.url else { return }
+                do {
+                    guard let data = HTMLExport.document(for: page, as: word ? .officeOpenXML : .rtf) else {
+                        throw CocoaError(.fileWriteUnknown)
+                    }
+                    try data.write(to: url, options: .atomic)
+                    let folder = (url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath
+                    self?.show(Toast(message: "Exported \(url.lastPathComponent) to \(folder)", revealURL: url))
+                } catch {
+                    self?.show(Toast(message: "Couldn't export: \(error.localizedDescription)"))
                 }
             }
         }

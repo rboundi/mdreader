@@ -206,6 +206,10 @@ struct AppCommands: Commands {
                 Button("Export as HTML…") { state.exportHTML() }
                     .keyboardShortcut("e", modifiers: [.command, .option])
                     .disabled(state.selected == nil || state.selected?.editing == true)
+                Button("Export as Word…") { state.exportDocument(word: true) }
+                    .disabled(state.selected == nil || state.selected?.editing == true)
+                Button("Export as RTF…") { state.exportDocument(word: false) }
+                    .disabled(state.selected == nil || state.selected?.editing == true)
             }
 
             CommandGroup(replacing: .printItem) {

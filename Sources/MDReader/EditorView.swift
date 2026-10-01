@@ -206,6 +206,14 @@ final class EditorController: NSObject, NSTextViewDelegate {
         }
     }
 
+    /// Changes part of the text from outside the editor (a task ticked in the preview), undoably.
+    func replaceText(in range: NSRange, with text: String) {
+        guard NSMaxRange(range) <= (textView.string as NSString).length else { return }
+        let selection = textView.selectedRange()
+        replace(range, with: text)
+        textView.setSelectedRange(selection)
+    }
+
     /// Replaces text as if typed, so it can be undone.
     private func replace(_ range: NSRange, with text: String) {
         guard textView.shouldChangeText(in: range, replacementString: text) else { return }
@@ -216,7 +224,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
     // MARK: Lists
 
     private static let listItem = try! NSRegularExpression(
-        pattern: #"^([ \t]*(?:>[ \t]?)*)([-*+]|(\d{1,9})([.)]))([ \t]+)(\[[ xX]\][ \t]+)?"#)
+        pattern: #"^([ \t]*(?:>[ \t]?)*[ \t]*)([-*+]|(\d{1,9})([.)]))([ \t]+)(\[[ xX]\][ \t]+)?"#)
 
     /// Return inside a list item starts the next item; on an empty item it ends the list.
     private func continueList() -> Bool {
@@ -251,7 +259,73 @@ final class EditorController: NSObject, NSTextViewDelegate {
 
     func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         if selector == #selector(NSResponder.insertNewline(_:)) { return continueList() }
+        if selector == #selector(NSResponder.insertTab(_:)) { return indentList(outdent: false) }
+        if selector == #selector(NSResponder.insertBacktab(_:)) { return indentList(outdent: true) }
         return false
+    }
+
+    /// Tab and ⇧Tab move the list items in the selection one level in or out. Returns false (a normal
+    /// Tab) when the cursor isn't in a list.
+    private func indentList(outdent: Bool) -> Bool {
+        let string = textView.string as NSString
+        let selection = textView.selectedRange()
+        let block = string.lineRange(for: selection)
+        var result = ""
+        var any = false
+        var inList = false
+        var firstDelta = 0
+        var location = block.location
+        while location < NSMaxRange(block) || (block.length == 0 && location == block.location) {
+            var start = 0, end = 0, contentsEnd = 0
+            string.getLineStart(&start, end: &end, contentsEnd: &contentsEnd, for: NSRange(location: location, length: 0))
+            var line = string.substring(with: NSRange(location: start, length: contentsEnd - start))
+            let terminator = string.substring(with: NSRange(location: contentsEnd, length: end - contentsEnd))
+            if let match = Self.listItem.firstMatch(in: line, range: NSRange(location: 0, length: (line as NSString).length)) {
+                // One level is the width of the item's marker and its space: 2 for "- ", 3 for "1. ".
+                let width = match.range(at: 2).length + 1
+                // In a quoted list the indentation sits after the last ">" and its space.
+                let lead = (line as NSString).substring(with: match.range(at: 1)) as NSString
+                var at = 0
+                let quote = lead.range(of: ">", options: .backwards)
+                if quote.location != NSNotFound {
+                    at = NSMaxRange(quote)
+                    if at < lead.length, lead.character(at: at) == 32 { at += 1 }
+                }
+                let indentation = lead.substring(from: at)
+                let text = NSMutableString(string: line)
+                var delta = 0
+                if outdent {
+                    if indentation.hasPrefix("\t") {
+                        delta = -1
+                    } else {
+                        delta = -min(width, indentation.prefix { $0 == " " }.count)
+                    }
+                    text.deleteCharacters(in: NSRange(location: at, length: -delta))
+                } else {
+                    // Lists indented with tabs get another tab; otherwise spaces.
+                    let unit = indentation.contains("\t") ? "\t" : String(repeating: " ", count: width)
+                    text.insert(unit, at: at)
+                    delta = (unit as NSString).length
+                }
+                line = text as String
+                if !inList { firstDelta = delta }
+                inList = true
+                any = any || delta != 0
+            }
+            result += line + terminator
+            if end <= location { break }
+            location = end
+        }
+        // In a list but nothing to do (⇧Tab at the top level): swallow the key, change nothing.
+        guard any else { return inList }
+        replace(block, with: result)
+        if selection.length == 0 {
+            let moved = max(block.location, selection.location + firstDelta)
+            textView.setSelectedRange(NSRange(location: moved, length: 0))
+        } else {
+            textView.setSelectedRange(NSRange(location: block.location, length: (result as NSString).length))
+        }
+        return true
     }
 
     // MARK: Syntax colors
@@ -397,6 +471,32 @@ final class EditorController: NSObject, NSTextViewDelegate {
 /// Keeps the text in a centered column as wide as the reading width. Dropped files open as tabs
 /// instead of inserting their path; dragged tabs are ignored.
 final class EditorTextView: NSTextView {
+    /// Pasting a web address over selected text makes a link of it: [text](address).
+    override func paste(_ sender: Any?) {
+        let range = selectedRange()
+        let selected = (string as NSString).substring(with: range)
+        if range.length > 0, selected.rangeOfCharacter(from: .newlines) == nil,
+            !selected.contains("["), !selected.contains("]"), !Self.isWebAddress(selected),
+            let pasted = NSPasteboard.general.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines),
+            Self.isWebAddress(pasted)
+        {
+            // Angle brackets keep an address with parentheses in one piece.
+            let address = pasted.contains("(") || pasted.contains(")") ? "<\(pasted)>" : pasted
+            let link = "[\(selected)](\(address))"
+            if shouldChangeText(in: range, replacementString: link) {
+                replaceCharacters(in: range, with: link)
+                didChangeText()
+            }
+            return
+        }
+        super.paste(sender)
+    }
+
+    private static func isWebAddress(_ text: String) -> Bool {
+        (text.hasPrefix("http://") || text.hasPrefix("https://"))
+            && !text.contains(where: \.isWhitespace) && URL(string: text) != nil
+    }
+
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         let pasteboard = sender.draggingPasteboard
         if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],

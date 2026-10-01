@@ -153,13 +153,25 @@ test("collapses YAML front matter", () => {
   assert.equal(c.querySelector("h1").textContent, "Body");
 });
 
-test("renders task lists as disabled checkboxes", () => {
-  const { render } = setup();
-  const c = render("- [x] done\n- [ ] todo");
+test("task checkboxes can be ticked and tell the app which one; raw HTML checkboxes stay inert", () => {
+  const { window, render, messages } = setup();
+  const c = render("- [x] done\n- [ ] todo\n\n<ul><li><input type=\"checkbox\"> html</li></ul>");
   const boxes = c.querySelectorAll("input[type=checkbox]");
-  assert.equal(boxes.length, 2);
-  assert.ok([...boxes].every((b) => b.disabled));
+  assert.equal(boxes.length, 3);
+  same([...boxes].map((b) => b.disabled), [false, false, true]);
   assert.ok(c.querySelector("ul.task-list"));
+  boxes[1].click();
+  const sent = messages.findLast((m) => m.type === "task");
+  assert.equal(sent.index, 1);
+  // States are from before the click, with each task's first word, for the app to check the file against.
+  same(sent.tasks, [{ checked: true, word: "done" }, { checked: false, word: "todo" }]);
+});
+
+test("⌘-click on a link asks to open it in the background", () => {
+  const { window, render, messages } = setup();
+  const c = render("[other](other.md)");
+  c.querySelector("a").dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true, metaKey: true }));
+  assert.equal(messages.findLast((m) => m.type === "link").background, true);
 });
 
 test("posts the outline to the app", () => {
@@ -567,4 +579,15 @@ test("a late preview reply for a link the pointer has left is dropped", async ()
   b.dispatchEvent(new window.MouseEvent("mouseover", { bubbles: true }));
   window.mdr.showPreview(first.seq, "# A");
   assert.equal(window.document.querySelector(".link-preview"), null);
+});
+
+test("tasks in footnotes aren't clickable; exported tasks are inert; Word export gets plain marks", async () => {
+  const { window, render } = setup();
+  const c = render("- [x] one\n\nText[^1]\n\n[^1]: note\n    - [ ] in footnote");
+  same([...c.querySelectorAll("input")].map((b) => b.classList.contains("task-box")), [true, false]);
+  const html = (await window.mdr.exportHTML()).html;
+  assert.doesNotMatch(html.match(/<input[^>]*>/)[0], /^(?!.*disabled)/);
+  const plain = (await window.mdr.exportHTML(true)).html;
+  assert.match(plain, /☑ one/);
+  assert.doesNotMatch(plain, /<input/);
 });

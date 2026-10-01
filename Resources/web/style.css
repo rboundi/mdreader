@@ -220,6 +220,7 @@ body[data-font="serif"] .markdown-body :is(h1, h2, h3, h4, h5, h6) { font-family
 
 .markdown-body ul.task-list { list-style: none; padding-left: 0.4em; }
 .markdown-body .task-item input { margin: 0 0.5em 0 0; vertical-align: middle; accent-color: var(--link); }
+.markdown-body .task-item input.task-box { cursor: pointer; }
 
 .markdown-body hr {
   height: 1px;

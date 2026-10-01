@@ -114,7 +114,6 @@ final class DocTab: Identifiable {
         return Decoded(text: String(decoding: data, as: UTF8.self), encoding: .utf8, exact: false)
     }
 
-    /// Writes the draft to disk in the file's encoding (UTF-8 if it can't hold the new text).
     /// Writes the draft in the file's encoding and line endings. A file that was Windows-1252 and
     /// now holds characters it can't store is saved as UTF-8.
     func save() throws {
@@ -152,45 +151,113 @@ final class DocTab: Identifiable {
         return count + (wordHasText ? 1 : 0)
     }
 
-    /// Checked and unchecked task list items, skipping fenced code blocks.
-    private static func countTasks(_ text: String) -> (done: Int, total: Int) {
-        var done = 0
-        var total = 0
-        var fence: Substring?
-        text.enumerateLines { line, _ in
-            let trimmed = line.drop { $0 == " " || $0 == "\t" }
-            if let open = fence {
-                if trimmed.hasPrefix(open) { fence = nil }
-                return
-            }
-            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
-                fence = trimmed.prefix(3)
-                return
-            }
-            // "- [ ] ", "* [x] ", "1. [X] ", also inside quotes ("> - [ ] ").
-            var rest = trimmed
-            while rest.hasPrefix(">") { rest = rest.dropFirst().drop { $0 == " " } }
-            if let first = rest.first, "-*+".contains(first) {
-                rest = rest.dropFirst()
-            } else {
-                let digits = rest.prefix { $0.isASCII && $0.isNumber }
-                guard !digits.isEmpty, digits.count <= 9 else { return }
-                rest = rest.dropFirst(digits.count)
-                guard let mark = rest.first, mark == "." || mark == ")" else { return }
-                rest = rest.dropFirst()
-            }
-            guard rest.first == " " || rest.first == "\t" else { return }
-            rest = rest.drop { $0 == " " || $0 == "\t" }
-            guard rest.count >= 3, rest.hasPrefix("["), rest.dropFirst(2).first == "]" else { return }
-            let after = rest.dropFirst(3).first
-            guard after == nil || after == " " || after == "\t" else { return }
-            switch rest.dropFirst().first {
-            case " ": total += 1
-            case "x", "X": total += 1; done += 1
-            default: break
+    // A task as marked renders it: a list marker, "[ ]" or "[x]", then spaces and some text.
+    private static let taskLine = try! NSRegularExpression(
+        pattern: #"^[ \t]*(?:>[ \t]*)*(?:[-*+]|[0-9]{1,9}[.)])[ \t]+\[([ xX])\] +(?=\S)"#)
+    private static let footnoteStart = try! NSRegularExpression(pattern: #"^ {0,3}\[\^[^\]]+\]:"#)
+
+    /// Where each task list item's mark (the character between the brackets) is, in document order.
+    /// Leaves out what the page doesn't show as tasks: front matter, fenced code, HTML comments
+    /// and footnotes.
+    static func taskMarks(in text: String) -> [NSRange] {
+        let string = text as NSString
+        var marks: [NSRange] = []
+        var fence: (character: Character, length: Int)?
+        var inComment = false
+        var inFootnote = false
+        var location = 0
+        // Front matter: from a first line of "---" to the next "---" or "...".
+        if text.hasPrefix("---") {
+            var start = 0, end = 0, contentsEnd = 0
+            string.getLineStart(&start, end: &end, contentsEnd: &contentsEnd, for: NSRange(location: 0, length: 0))
+            if string.substring(to: contentsEnd).trimmingCharacters(in: .whitespaces) == "---" {
+                var at = end
+                while at < string.length {
+                    string.getLineStart(&start, end: &end, contentsEnd: &contentsEnd, for: NSRange(location: at, length: 0))
+                    let line = string.substring(with: NSRange(location: start, length: contentsEnd - start))
+                        .trimmingCharacters(in: .whitespaces)
+                    at = end
+                    if line == "---" || line == "..." {
+                        location = end
+                        break
+                    }
+                }
             }
         }
-        return (done, total)
+        while location < string.length {
+            var start = 0, end = 0, contentsEnd = 0
+            string.getLineStart(&start, end: &end, contentsEnd: &contentsEnd, for: NSRange(location: location, length: 0))
+            location = end
+            let lineRange = NSRange(location: start, length: contentsEnd - start)
+            let line = string.substring(with: lineRange)
+            // Quote markers don't count when looking for fences.
+            var body = line.drop { $0 == " " || $0 == "\t" }
+            while body.hasPrefix(">") { body = body.dropFirst().drop { $0 == " " || $0 == "\t" } }
+
+            if let open = fence {
+                // Closes on the same character, at least as long, with nothing after it.
+                let run = body.prefix { $0 == open.character }
+                if run.count >= open.length, body.dropFirst(run.count).allSatisfy({ $0 == " " || $0 == "\t" }) { fence = nil }
+                continue
+            }
+            if let first = body.first, first == "`" || first == "~" {
+                let run = body.prefix { $0 == first }
+                // A backtick fence can't have a backtick later on the line (that's inline code).
+                if run.count >= 3, !(first == "`" && body.dropFirst(run.count).contains("`")) {
+                    fence = (first, run.count)
+                    continue
+                }
+            }
+            if inComment {
+                if line.contains("-->") { inComment = false }
+                continue
+            }
+            if body.hasPrefix("<!--") {
+                inComment = !line.contains("-->")
+                continue
+            }
+            if footnoteStart.firstMatch(in: text, options: .anchored, range: lineRange) != nil {
+                inFootnote = true
+                continue
+            }
+            if inFootnote {
+                // A footnote goes on through blank and indented lines.
+                if line.trimmingCharacters(in: .whitespaces).isEmpty || line.hasPrefix("    ") || line.hasPrefix("\t") { continue }
+                inFootnote = false
+            }
+            if let match = taskLine.firstMatch(in: text, options: .anchored, range: lineRange) {
+                marks.append(match.range(at: 1))
+            }
+        }
+        return marks
+    }
+
+    private static func countTasks(_ text: String) -> (done: Int, total: Int) {
+        let string = text as NSString
+        let marks = taskMarks(in: text)
+        return (marks.filter { string.substring(with: $0) != " " }.count, marks.count)
+    }
+
+    /// What the page shows for one task: whether it's ticked, and the first word of its text.
+    struct ShownTask {
+        let checked: Bool
+        let word: String
+    }
+
+    /// `text` with task number `index` ticked or unticked. Nil unless the file's tasks match the
+    /// page's one for one (same number, same states, each line containing the task's first word),
+    /// so a click can never change a different line.
+    static func togglingTask(_ index: Int, shown: [ShownTask], in text: String) -> (text: String, mark: NSRange)? {
+        let marks = taskMarks(in: text)
+        guard marks.count == shown.count, marks.indices.contains(index) else { return nil }
+        let string = text as NSString
+        for (mark, task) in zip(marks, shown) {
+            guard (string.substring(with: mark) != " ") == task.checked else { return nil }
+            let line = string.substring(with: string.lineRange(for: mark))
+            guard task.word.isEmpty || line.contains(task.word) else { return nil }
+        }
+        let nowChecked = !shown[index].checked
+        return (string.replacingCharacters(in: marks[index], with: nowChecked ? "x" : " "), marks[index])
     }
 
     /// The `title:` line of a YAML front matter block at the top of the file.
