@@ -894,6 +894,115 @@ final class AppState: ObservableObject {
         DispatchQueue.main.async { NotificationCenter.default.post(name: .findNext, object: step) }
     }
 
+    func showReplace() {
+        guard selected?.editing == true else { return }
+        editor.find(.showReplaceInterface)
+    }
+
+    // MARK: Go to Line
+
+    func goToLine() {
+        guard let tab = selected, tab.error == nil, let window = reader.webView.window else { return }
+        let alert = NSAlert()
+        alert.messageText = "Go to Line"
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 220, height: 24))
+        field.placeholderString = "Line number"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Go")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        alert.beginSheetModal(for: window) { [weak self, weak tab] response in
+            guard response == .alertFirstButtonReturn, let self, let tab, tab === self.selected,
+                let line = Int(field.stringValue.trimmingCharacters(in: .whitespaces)), line > 0
+            else { return }
+            if tab.editing {
+                self.editor.goToLine(line)
+            } else {
+                // The source view shows that line at the top; the rendered page, the same place in the text.
+                self.reader.showOffset(EditorController.range(ofLine: line, in: tab.displayText as NSString).location)
+            }
+        }
+    }
+
+    // MARK: Keep on Top
+
+    /// Keeps the window above other apps' windows. Only while MDReader is in the background, so
+    /// its own Settings window and panels still come to the front.
+    @Published var keepOnTop = false {
+        didSet { updateWindowLevel() }
+    }
+
+    func updateWindowLevel() {
+        reader.webView.window?.level = keepOnTop && !NSApp.isActive ? .floating : .normal
+    }
+
+    // MARK: Document Info
+
+    private static let linkPattern = try! NSRegularExpression(pattern: #"(!?)\[[^\]\n]*\]\([^)\n]*\)|<https?://[^>\s]+>"#)
+
+    func showDocumentInfo() {
+        guard let tab = selected, tab.error == nil, let window = reader.webView.window else { return }
+        let text = tab.displayText
+        let string = text as NSString
+        var links = 0, images = 0
+        Self.linkPattern.enumerateMatches(in: text, range: NSRange(location: 0, length: string.length)) { match, _, _ in
+            guard let match else { return }
+            if match.range(at: 1).length > 0 { images += 1 } else { links += 1 }
+        }
+        var lines = 0
+        string.enumerateSubstrings(in: NSRange(location: 0, length: string.length), options: [.byLines, .substringNotRequired]) {
+            _, _, _, _ in lines += 1
+        }
+        let words = Self.wordCount(of: tab)
+        var rows: [(String, String)] = [
+            ("Words", words.formatted()),
+            ("Characters", text.count.formatted()),
+            ("Lines", lines.formatted()),
+            ("Headings", outline.count.formatted()),
+            ("Links", links.formatted()),
+            ("Images", images.formatted()),
+        ]
+        if tab.tasks.total > 0 { rows.append(("Tasks", "\(tab.tasks.done) of \(tab.tasks.total) done")) }
+        if words > 0 { rows.append(("Reading time", "\(max(1, Int((Double(words) / 230).rounded()))) min")) }
+        if !tab.isUntitled {
+            let values = try? tab.url.resolvingSymlinksInPath().resourceValues(
+                forKeys: [.fileSizeKey, .creationDateKey, .contentModificationDateKey])
+            if let size = values?.fileSize {
+                rows.append(("Size", ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)))
+            }
+            if let created = values?.creationDate {
+                rows.append(("Created", created.formatted(date: .abbreviated, time: .shortened)))
+            }
+            if let modified = values?.contentModificationDate {
+                rows.append(("Modified", modified.formatted(date: .abbreviated, time: .shortened)))
+            }
+            rows.append(("Folder", (tab.url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath))
+        }
+        let grid = NSGridView(views: rows.map { name, value in
+            let label = NSTextField(labelWithString: name)
+            label.textColor = .secondaryLabelColor
+            let detail = NSTextField(labelWithString: value)
+            detail.isSelectable = true
+            detail.lineBreakMode = .byTruncatingMiddle
+            detail.toolTip = value
+            return [label, detail]
+        })
+        grid.column(at: 0).xPlacement = .trailing
+        grid.column(at: 1).width = 200
+        grid.rowSpacing = 4
+        grid.frame.size = grid.fittingSize
+        let alert = NSAlert()
+        alert.messageText = tab.isUntitled ? tab.title : tab.fileName
+        alert.accessoryView = grid
+        alert.addButton(withTitle: "OK")
+        alert.beginSheetModal(for: window)
+    }
+
+    /// Words in what the tab shows: the draft while editing, otherwise the count made at load.
+    private static func wordCount(of tab: DocTab) -> Int {
+        tab.editing ? DocTab.countWords(tab.displayText) : tab.wordCount
+    }
+
     /// Shows the Search pane and puts the cursor in its field.
     func showSearch() {
         focusMode = false

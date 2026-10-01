@@ -137,7 +137,7 @@ final class DocTab: Identifiable {
     }
 
     /// Words that contain a letter or digit, so Markdown punctuation (#, -, |, ```) isn't counted.
-    private static func countWords(_ text: String) -> Int {
+    static func countWords(_ text: String) -> Int {
         var count = 0
         var wordHasText = false
         for scalar in text.unicodeScalars {

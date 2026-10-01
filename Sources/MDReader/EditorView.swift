@@ -221,6 +221,89 @@ final class EditorController: NSObject, NSTextViewDelegate {
         textView.didChangeText()
     }
 
+    // MARK: Tables and lines
+
+    /// Lines up the columns of the table the cursor is in. False when it isn't in one.
+    func alignTable() -> Bool {
+        let string = textView.string as NSString
+        let cursor = textView.selectedRange().location
+        // The run of lines around the cursor that have a pipe in them.
+        var lines: [(text: String, terminator: String, start: Int)] = []
+        func line(at location: Int) -> (text: String, terminator: String, start: Int, end: Int) {
+            var start = 0, end = 0, contentsEnd = 0
+            string.getLineStart(&start, end: &end, contentsEnd: &contentsEnd, for: NSRange(location: location, length: 0))
+            return (
+                string.substring(with: NSRange(location: start, length: contentsEnd - start)),
+                string.substring(with: NSRange(location: contentsEnd, length: end - contentsEnd)), start, end
+            )
+        }
+        let here = line(at: cursor)
+        guard here.text.contains("|") else { return false }
+        lines.append((here.text, here.terminator, here.start))
+        var start = here.start
+        while start > 0 {
+            let previous = line(at: start - 1)
+            guard previous.text.contains("|") else { break }
+            lines.insert((previous.text, previous.terminator, previous.start), at: 0)
+            start = previous.start
+        }
+        var end = here.end
+        while end < string.length {
+            let next = line(at: end)
+            guard next.text.contains("|"), next.end > end else { break }
+            lines.append((next.text, next.terminator, next.start))
+            end = next.end
+        }
+        // The table starts at the line above its delimiter row.
+        guard let delimiter = lines.indices.dropFirst().first(where: { MarkdownTable.isDelimiter(lines[$0].text) }),
+            let cursorLine = lines.lastIndex(where: { $0.start <= cursor }), cursorLine >= delimiter - 1
+        else { return false }
+        let table = Array(lines[(delimiter - 1)...])
+        guard let aligned = MarkdownTable.aligned(table.map(\.text)) else { return false }
+        let range = NSRange(location: table[0].start, length: end - table[0].start)
+        let result = zip(aligned, table).map { $0 + $1.terminator }.joined()
+        guard result != string.substring(with: range) else { return true }
+        // The cursor stays on its row, at the same column where the row is still that long.
+        let row = cursorLine - (delimiter - 1)
+        let column = cursor - table[row].start
+        replace(range, with: result)
+        let rowStart = table[0].start
+            + zip(aligned, table).prefix(row).reduce(0) { $0 + ($1.0 as NSString).length + ($1.1.terminator as NSString).length }
+        textView.setSelectedRange(NSRange(location: rowStart + min(column, (aligned[row] as NSString).length), length: 0))
+        return true
+    }
+
+    /// The range of line number `line` (from 1) without its line break; the last line when there
+    /// are fewer.
+    nonisolated static func range(ofLine line: Int, in string: NSString) -> NSRange {
+        var location = 0
+        var number = 1
+        while number < line {
+            let next = NSMaxRange(string.lineRange(for: NSRange(location: location, length: 0)))
+            if next >= string.length {
+                // Text ending in a line break has one more, empty, line.
+                if next > location, string.length > 0, CharacterSet.newlines.contains(UnicodeScalar(string.character(at: string.length - 1)) ?? " ") {
+                    location = next
+                }
+                break
+            }
+            location = next
+            number += 1
+        }
+        var start = 0, end = 0, contentsEnd = 0
+        string.getLineStart(&start, end: &end, contentsEnd: &contentsEnd, for: NSRange(location: location, length: 0))
+        return NSRange(location: start, length: contentsEnd - start)
+    }
+
+    /// Puts the cursor at the start of a line and shows it.
+    func goToLine(_ line: Int) {
+        let range = Self.range(ofLine: line, in: textView.string as NSString)
+        textView.setSelectedRange(NSRange(location: range.location, length: 0))
+        textView.scrollRangeToVisible(range)
+        if range.length > 0 { textView.showFindIndicator(for: range) }
+        focus()
+    }
+
     // MARK: Lists
 
     private static let listItem = try! NSRegularExpression(
@@ -420,7 +503,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         textView.window?.makeFirstResponder(textView)
     }
 
-    /// Runs one of the find bar actions (show, next, previous).
+    /// Runs one of the find bar actions (show, replace, next, previous).
     func find(_ action: NSTextFinder.Action) {
         let item = NSMenuItem()
         item.tag = action.rawValue

@@ -30,9 +30,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated { AppState.shared.restoreTabs() }
     }
 
+    func applicationDidResignActive(_ notification: Notification) {
+        MainActor.assumeIsolated { AppState.shared.updateWindowLevel() }
+    }
+
     func applicationDidBecomeActive(_ notification: Notification) {
         // Picks up a custom.css created (or recreated) while MDReader was in the background.
         MainActor.assumeIsolated {
+            AppState.shared.updateWindowLevel()
             AppState.shared.reader.watchCustomCSS()
             AppState.shared.findNeutrino()
         }
@@ -190,6 +195,9 @@ struct AppCommands: Commands {
                 Button("Save") { state.save() }
                     .keyboardShortcut("s")
                     .disabled(state.selected?.isDirty != true)
+                Button("Document Info") { state.showDocumentInfo() }
+                    .keyboardShortcut("i", modifiers: [.command, .shift])
+                    .disabled(state.selected == nil || state.selected?.error != nil)
                 Divider()
                 Button("Open Clipboard") { state.openClipboard() }
                     .keyboardShortcut("v", modifiers: [.command, .shift])
@@ -239,6 +247,9 @@ struct AppCommands: Commands {
                 Button("Jump to Heading…") { state.palette = state.palette == .headings ? nil : .headings }
                     .keyboardShortcut("j", modifiers: [.command, .shift])
                     .disabled(state.selected == nil)
+                Button("Go to Line…") { state.goToLine() }
+                    .keyboardShortcut("l")
+                    .disabled(state.selected == nil || state.selected?.error != nil)
             }
         }
 
@@ -254,6 +265,9 @@ struct AppCommands: Commands {
             Button("Link") { state.editor.insertLink() }
                 .keyboardShortcut("k")
                 .disabled(state.selected?.editing != true)
+            Divider()
+            Button("Align Table") { if !state.editor.alignTable() { NSSound.beep() } }
+                .disabled(state.selected?.editing != true)
         }
 
         CommandGroup(after: .pasteboard) {
@@ -268,6 +282,8 @@ struct AppCommands: Commands {
             Button("Find…") { state.showFind() }
                 .keyboardShortcut("f")
                 .disabled(state.selected == nil)
+            Button("Find and Replace…") { state.showReplace() }
+                .disabled(state.selected?.editing != true)
             Button("Search in Files…") { state.showSearch() }
                 .keyboardShortcut("f", modifiers: [.command, .option])
                 .disabled(state.selected == nil)
@@ -326,6 +342,8 @@ struct AppCommands: Commands {
         }
 
         CommandGroup(before: .windowList) {
+            Toggle("Keep on Top", isOn: $state.keepOnTop)
+            Divider()
             Button("Show Next Tab") { state.selectTab(offset: 1) }
                 .keyboardShortcut(.tab, modifiers: .control)
             Button("Show Previous Tab") { state.selectTab(offset: -1) }

@@ -41,10 +41,12 @@
 - Optional heading numbers (1, 1.1, 1.2) in the document and the outline
 - Keyboard reading: <kbd>j</kbd> / <kbd>k</kbd> to scroll, <kbd>n</kbd> / <kbd>p</kbd> for the next or previous heading, <kbd>g</kbd> / <kbd>G</kbd> for the top or bottom
 - Back and Forward after following links, also with a two-finger swipe or the mouse side buttons
-- Jump to Heading (<kbd>⇧</kbd><kbd>⌘</kbd><kbd>J</kbd>)
+- Jump to Heading (<kbd>⇧</kbd><kbd>⌘</kbd><kbd>J</kbd>) and Go to Line (<kbd>⌘</kbd><kbd>L</kbd>)
 - Reopens each file where you left off
 - Word count, time left, tasks done and last modified date in the title bar
 - Select text to see how many words it has
+- **File → Document Info** (<kbd>⇧</kbd><kbd>⌘</kbd><kbd>I</kbd>) lists words, characters, lines, headings, links, images, size and dates
+- **Window → Keep on Top** keeps the window above other apps
 - The front matter `title:` is used as the tab and window title
 - Live reload when the file changes on disk, scrolling to the part that changed
 - Find in page, and search across open tabs or the folder (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>F</kbd>)
@@ -74,6 +76,8 @@
 - **Edit** (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>O</kbd>) switches to a text editor with the rendered page beside it; <kbd>⌘</kbd><kbd>S</kbd> saves
 - <kbd>⌘</kbd><kbd>B</kbd>, <kbd>⌘</kbd><kbd>I</kbd> and <kbd>⌘</kbd><kbd>K</kbd> for bold, italic and links; lists continue when you press Return
 - <kbd>Tab</kbd> and <kbd>⇧</kbd><kbd>Tab</kbd> indent and outdent list items; pasting a web address over selected text makes a link
+- **Format → Align Table** lines up the columns of the table the cursor is in
+- Find and replace: **Edit → Find and Replace…**
 - **New Document** (<kbd>⌘</kbd><kbd>N</kbd>)
 - To edit in another app instead, choose it in **Settings → Editing → Edit with**. Changes show as soon as you save
 - For longer edits there is [Neutrino](https://github.com/rboundi/neutrino), a small code editor. With it installed, **File → Edit in Neutrino** opens the current file there
@@ -123,6 +127,8 @@ Select a `.md` file in Finder, press <kbd>⌘</kbd><kbd>I</kbd>, choose MDReader
 | Open Clipboard | <kbd>⇧</kbd><kbd>⌘</kbd><kbd>V</kbd> |
 | Back / Forward | <kbd>⌘</kbd><kbd>[</kbd> / <kbd>⌘</kbd><kbd>]</kbd> |
 | Jump to Heading | <kbd>⇧</kbd><kbd>⌘</kbd><kbd>J</kbd> |
+| Go to Line | <kbd>⌘</kbd><kbd>L</kbd> |
+| Document Info | <kbd>⇧</kbd><kbd>⌘</kbd><kbd>I</kbd> |
 | Edit / stop editing | <kbd>⌥</kbd><kbd>⌘</kbd><kbd>O</kbd> |
 | Save | <kbd>⌘</kbd><kbd>S</kbd> |
 | Bold / italic / link (editing) | <kbd>⌘</kbd><kbd>B</kbd> / <kbd>⌘</kbd><kbd>I</kbd> / <kbd>⌘</kbd><kbd>K</kbd> |
@@ -164,6 +170,7 @@ Sources/MDReader/
   OutlineView.swift       Outline
   PaletteView.swift       Quick Open and Jump to Heading
   EditorView.swift        The text editor
+  TableFormat.swift       Align Table
   HTMLExport.swift        HTML export and rich-text copy
   UpdateChecker.swift     Release check
   SettingsView.swift      Settings window
