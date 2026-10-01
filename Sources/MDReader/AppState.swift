@@ -607,12 +607,37 @@ final class AppState: ObservableObject {
             return
         }
         guard let app = editorURL else { return startEditing(tab) }
+        open(tab, with: app)
+    }
+
+    private func open(_ tab: DocTab, with app: URL) {
         NSWorkspace.shared.open([tab.url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration()) {
             _, error in
             if let error {
                 DispatchQueue.main.async { AppState.shared.show(Toast(message: error.localizedDescription)) }
             }
         }
+    }
+
+    // MARK: Neutrino
+
+    /// Neutrino, the code editor suggested for more than quick edits, if it's installed.
+    static let neutrinoPage = URL(string: "https://github.com/rboundi/neutrino")!
+    var neutrinoURL: URL? {
+        NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.movinapp.neutrino.macos")
+    }
+
+    func editInNeutrino() {
+        guard let tab = selected, let app = neutrinoURL else { return }
+        // Unsaved edits made here go to the file first, so Neutrino opens the current text.
+        guard !tab.isDirty || save(tab) else { return }
+        open(tab, with: app)
+    }
+
+    func useNeutrinoAsEditor() {
+        guard let app = neutrinoURL else { return }
+        UserDefaults.standard.set(app.path, forKey: Prefs.editorApp)
+        objectWillChange.send()
     }
 
     private func startEditing(_ tab: DocTab) {

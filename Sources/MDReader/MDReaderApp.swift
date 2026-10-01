@@ -179,6 +179,10 @@ struct AppCommands: Commands {
                 }
                 .keyboardShortcut("o", modifiers: [.command, .option])
                 .disabled(state.selected == nil)
+                if state.neutrinoURL != nil, state.editorName != "Neutrino" {
+                    Button("Edit in Neutrino") { state.editInNeutrino() }
+                        .disabled(state.selected == nil || state.selected?.isUntitled == true)
+                }
                 Button("Save") { state.save() }
                     .keyboardShortcut("s")
                     .disabled(state.selected?.isDirty != true)

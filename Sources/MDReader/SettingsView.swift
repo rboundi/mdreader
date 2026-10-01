@@ -136,6 +136,29 @@ struct SettingsView: View {
             Toggle("Show preview while editing", isOn: Binding(
                 get: { editPreview }, set: { AppState.shared.setPreviewWhileEditing($0) }))
         }
+        Section {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Neutrino")
+                    Text("A code editor with regex find and replace, for longer edits.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if let neutrino = AppState.shared.neutrinoURL {
+                    if editorPath == neutrino.path {
+                        Text("In use").foregroundStyle(.secondary)
+                    } else {
+                        Button("Use Neutrino") {
+                            AppState.shared.useNeutrinoAsEditor()
+                            editorPath = neutrino.path
+                        }
+                    }
+                } else {
+                    Button("Get Neutrino") { NSWorkspace.shared.open(AppState.neutrinoPage) }
+                }
+            }
+        }
     }
 
     @ViewBuilder

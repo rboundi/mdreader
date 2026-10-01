@@ -76,6 +76,7 @@
 - <kbd>Tab</kbd> and <kbd>⇧</kbd><kbd>Tab</kbd> indent and outdent list items; pasting a web address over selected text makes a link
 - **New Document** (<kbd>⌘</kbd><kbd>N</kbd>)
 - To edit in another app instead, choose it in **Settings → Editing → Edit with**. Changes show as soon as you save
+- For longer edits there is [Neutrino](https://github.com/rboundi/neutrino), a small code editor. With it installed, **File → Edit in Neutrino** opens the current file there
 
 **Other**
 - Share button for Mail, Messages and AirDrop
