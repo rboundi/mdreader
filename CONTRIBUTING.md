@@ -17,7 +17,7 @@ cd tests && npm install && npm test # renderer tests
 - **Native app** (`Sources/MDReader/`): SwiftUI and AppKit, with no third-party Swift packages. The app owns one `WKWebView`, shared by all tabs, in `ReaderController.swift`.
 - **Renderer** (`Resources/web/`): `app.js` turns Markdown into HTML with marked, cleans it, and adds the extras (alerts, anchors, math, diagrams, find). `style.css` holds the light, dark and print themes.
 - **Vendored libraries** (`Resources/web/vendor/`): pinned and unmodified. If you update one, update `THIRD_PARTY_NOTICES.md` too.
-- **Icon** (`scripts/make_icon.swift`): drawn in code. Run `./scripts/make_icon.sh` after changing it.
+- **Icon** (`scripts/make_icon.swift`): the layers are drawn in code and written as an Icon Composer document, `Resources/AppIcon.icon`. Run `./scripts/make_icon.sh` after changing it (needs Xcode 26 or later) and commit the regenerated `Assets.car`, `AppIcon.icns` and `docs/icon-256.png`.
 
 ## Guidelines
 
