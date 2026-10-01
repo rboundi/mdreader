@@ -145,6 +145,9 @@ final class AppState: ObservableObject {
         reader.webView.onSaveDiagram = { [weak self] index, svg in self?.reader.saveDiagram(index, asSVG: svg) }
         editor.onDirtyChange = { [weak self] in self?.objectWillChange.send() }
         reader.onProgress = { [weak self] progress in self?.updateTimeLeft(progress) }
+        reader.diagramsInUse = { [weak self] in
+            self?.tabs.contains { $0.displayText.contains("```mermaid") || $0.displayText.contains("~~~mermaid") } ?? false
+        }
         reader.onSelectionWords = { [weak self] words in self?.setSelectionWords(words) }
         editor.onSelectionWords = { [weak self] words in self?.setSelectionWords(words) }
         reader.webView.onCopyTable = { [weak self] index, csv in self?.reader.copyTable(index, csv: csv) }

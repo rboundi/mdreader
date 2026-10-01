@@ -25,6 +25,10 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
     var onFolds: (([String]) -> Void)?
     /// How far down the page the reader is (0–1), and how many words are selected.
     var onProgress: ((Double) -> Void)?
+    /// Whether any open tab has a diagram. When none does, the page is reloaded to drop Mermaid,
+    /// which otherwise stays in memory (tens of megabytes) for the rest of the session.
+    var diagramsInUse: (() -> Bool)?
+    private var mermaidLoaded = false
     var onSelectionWords: ((Int) -> Void)?
 
     private let templateURL = Bundle.main.resourceURL?.appendingPathComponent("web/index.html")
@@ -95,6 +99,13 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
     // MARK: Rendering
 
     func display(_ tab: DocTab?) {
+        // A fresh page forgets the libraries it loaded; the render below is queued until it's ready.
+        let trim = ready && mermaidLoaded && printCompletion == nil && diagramsInUse?() == false
+        if trim {
+            mermaidLoaded = false
+            ready = false
+            loadTemplate()
+        }
         guard let tab else {
             currentKey = nil
             send(["clear": true])
@@ -105,9 +116,11 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
         if let pending = tab.pendingScroll {
             scroll = pending
             tab.pendingScroll = nil
-        } else {
+        } else if key == currentKey, !trim {
             // Same document + mode: keep the reader where it is (e.g. file changed on disk).
-            scroll = key == currentKey ? -1 : (scrollPositions[key] ?? 0)
+            scroll = -1
+        } else {
+            scroll = scrollPositions[key] ?? 0
         }
         currentKey = key
         defer { onDisplay?() }
@@ -457,6 +470,7 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         // WebKit's page process crashed or was killed: reload the template and redraw the current tab.
         ready = false
+        mermaidLoaded = false
         lightboxOpen = false
         self.webView.canScrollHorizontally = false
         pendingRender = lastRender
@@ -479,6 +493,8 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
             if let progress = body["progress"] as? NSNumber { onProgress?(progress.doubleValue) }
         case "rendered":
             onDisplay?()
+        case "library":
+            if body["name"] as? String == "mermaid" { mermaidLoaded = true }
         case "selection":
             onSelectionWords?((body["words"] as? NSNumber)?.intValue ?? 0)
         case "copyLink":

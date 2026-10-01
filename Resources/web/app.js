@@ -456,6 +456,8 @@
     const blocks = [...root.querySelectorAll(".mermaid-block")];
     if (!blocks.length) return;
     await loadScript("vendor/mermaid.tiny.js");
+    // Mermaid is large; the app drops it again once no open tab has a diagram.
+    post({ type: "library", name: "mermaid" });
     if (typeof mermaid === "undefined") {
       // The bundled Mermaid needs the WebKit in macOS 13.3 or later.
       for (const block of blocks) {
