@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct ContentView: View {
     @EnvironmentObject private var state: AppState
+    @ObservedObject private var status = AppState.shared.status
     // Redraw page-coloured chrome when switching between Light and Sepia (same system appearance).
     @AppStorage(Prefs.appearance) private var appearance = AppearanceMode.system.rawValue
     @AppStorage(Prefs.checkForUpdates) private var checkForUpdates = true
@@ -196,9 +197,11 @@ struct ContentView: View {
 
     private var subtitle: String {
         guard let tab = state.selected else { return "" }
-        let folder = (tab.url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath
-        let selection = state.selectionWords > 0
-            ? "\(state.selectionWords.formatted()) \(state.selectionWords == 1 ? "word" : "words") selected" : nil
+        // A new document lives in a temporary folder until it's saved; don't show that path.
+        let folder = tab.isUntitled
+            ? "Not saved yet" : (tab.url.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath
+        let selection = status.selectionWords > 0
+            ? "\(status.selectionWords.formatted()) \(status.selectionWords == 1 ? "word" : "words") selected" : nil
         if tab.editing {
             return "\(folder) — Editing" + (tab.isDirty ? ", not saved" : "") + (selection.map { " · \($0)" } ?? "")
         }
@@ -210,7 +213,7 @@ struct ContentView: View {
         } else if tab.wordCount > 0 {
             let minutes = max(1, Int((Double(tab.wordCount) / 230).rounded()))
             parts.append("\(tab.wordCount.formatted()) words")
-            parts.append(state.minutesLeft.map { "\($0) min left" } ?? "\(minutes) min read")
+            parts.append(status.minutesLeft.map { "\($0) min left" } ?? "\(minutes) min read")
         }
         if tab.tasks.total > 0 { parts.append("\(tab.tasks.done) of \(tab.tasks.total) tasks done") }
         if let modified = tab.modified { parts.append(Self.modifiedText(modified)) }

@@ -300,8 +300,11 @@ body.code-line-numbers .markdown-body pre code .line::before {
   position: absolute;
   top: 7px;
   right: 12px;
+  padding: 0 4px;
   font: 11px var(--font-sans);
   color: var(--muted);
+  background: var(--code-bg);
+  border-radius: 4px;
   opacity: 0.8;
   transition: opacity 0.15s;
 }

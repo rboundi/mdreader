@@ -19,6 +19,14 @@ struct Toast: Equatable {
 }
 
 @MainActor
+final class ReadingStatus: ObservableObject {
+    /// Words in the current selection.
+    @Published var selectionWords = 0
+    /// Reading time left; nil at the top or bottom of the page.
+    @Published var minutesLeft: Int?
+}
+
+@MainActor
 final class AppState: ObservableObject {
     static let shared = AppState()
 
@@ -30,8 +38,13 @@ final class AppState: ObservableObject {
             if !restoring {
                 reader.display(selected)
                 selected?.changedInBackground = false
-                selectionWords = 0
-                minutesLeft = nil
+                status.selectionWords = 0
+                status.minutesLeft = nil
+                // A tab left in the editor follows the current preview setting.
+                if let tab = selected, tab.editing, tab.showSource == previewWhileEditing {
+                    tab.showSource = !previewWhileEditing
+                    reader.display(tab)
+                }
                 if let tab = selected, tab.editing {
                     editor.show(tab)
                     editor.prepare(offset: nil)
@@ -65,9 +78,9 @@ final class AppState: ObservableObject {
     @Published var focusMode = false
     /// Sidebar width while its edge is being dragged.
     @Published var sidebarDragWidth: Double?
-    /// Words in the current selection, and reading time left (nil at the top or bottom of the page).
-    @Published private(set) var selectionWords = 0
-    @Published private(set) var minutesLeft: Int?
+    /// Selection word count and time left. Kept apart so their frequent changes redraw only the
+    /// title bar, not the menus and the whole window.
+    let status = ReadingStatus()
     /// Subfolders of the current document's folder, for the Files sidebar.
     @Published private(set) var folderSubfolders: [URL] = []
     private var filesSort = UserDefaults.standard.string(forKey: Prefs.filesSort) ?? "name"
@@ -245,25 +258,6 @@ final class AppState: ObservableObject {
         return tab
     }
 
-    /// Puts `url` in `old`'s place (after a rename or a first save), keeping selection and editing.
-    private func replaceTab(_ old: DocTab, with url: URL) {
-        guard let index = tabs.firstIndex(where: { $0 === old }) else { return }
-        let wasSelected = old.id == selectedID
-        let wasEditing = old.editing
-        editor.stopShowing(old)
-        reader.forget(old)
-        old.draft = nil
-        old.editing = false
-        let tab = makeTab(MarkdownFiles.canonical(url))
-        tab.pendingScroll = reader.lastScroll(for: old)
-        tab.showSource = wasEditing ? old.sourceBeforeEditing : old.showSource
-        tabs[index] = tab
-        if wasSelected { selectedID = tab.id }
-        addRecent(tab.url)
-        persistTabs()
-        if wasEditing, wasSelected { startEditing(tab) }
-    }
-
     /// README, then index, then the first Markdown file by name.
     private static func mainDocument(in folder: URL) -> URL? {
         let files = markdownFiles(in: MarkdownFiles.canonical(folder))
@@ -291,10 +285,12 @@ final class AppState: ObservableObject {
         guard confirmClosing([tabs[index]]) else { return }
         let tab = tabs.remove(at: index)
         editor.stopShowing(tab)
+        // A new document that was never saved anywhere leaves nothing behind.
+        if tab.isUntitled { try? FileManager.default.removeItem(at: tab.url) }
         rememberScroll(of: tab)
         reader.forget(tab)
         closedTabs.removeAll { $0 == tab.url }
-        closedTabs.append(tab.url)
+        if !tab.isUntitled { closedTabs.append(tab.url) }
         if closedTabs.count > 20 { closedTabs.removeFirst() }
         if selectedID == id {
             selectedID = tabs.isEmpty ? nil : tabs[min(index, tabs.count - 1)].id
@@ -352,6 +348,11 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// At quit: new documents that were never saved anywhere are thrown away.
+    func discardUntitled() {
+        for tab in tabs where tab.isUntitled { try? FileManager.default.removeItem(at: tab.url) }
+    }
+
     /// Clears out clipboard files from earlier sessions that aren't open in a tab.
     func removeOldClipboardFiles() {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("MDReader", isDirectory: true)
@@ -388,27 +389,54 @@ final class AppState: ObservableObject {
     private func saveAs(_ tab: DocTab) -> Bool {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
-        panel.nameFieldStringValue = "Untitled.md"
+        panel.nameFieldStringValue = tab.fileName
+        panel.message = "Save \(tab.title)"
         panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return false }
+        guard panel.runModal() == .OK, let chosen = panel.url else { return false }
+        let alert = NSAlert()
+        if tabs.contains(where: { $0 !== tab && $0.url == MarkdownFiles.canonical(chosen) }) {
+            alert.messageText = "\(chosen.lastPathComponent) is open in another tab"
+            alert.informativeText = "Close that tab or choose another name."
+            alert.runModal()
+            return false
+        }
         do {
-            try (tab.draft ?? tab.text).write(to: url, atomically: true, encoding: .utf8)
+            try (tab.draft ?? tab.text).write(to: chosen, atomically: true, encoding: .utf8)
         } catch {
-            let alert = NSAlert()
-            alert.messageText = "Couldn't save \(url.lastPathComponent)"
+            alert.messageText = "Couldn't save \(chosen.lastPathComponent)"
             alert.informativeText = error.localizedDescription
             alert.runModal()
             return false
         }
         let temporary = tab.url
-        replaceTab(tab, with: url)
+        relocate(tab, to: chosen)
         try? FileManager.default.removeItem(at: temporary)
         return true
     }
 
+    /// The tab's file is now at `url` (first save, or rename). Everything keyed by path follows.
+    private func relocate(_ tab: DocTab, to url: URL) {
+        let from = tab.url
+        tab.move(to: MarkdownFiles.canonical(url))
+        let to = tab.url
+        scrollMemory[to.path] = scrollMemory[from.path]
+        foldMemory[to.path] = foldMemory[from.path]
+        backStack = backStack.map { $0.url == from ? Position(url: to, y: $0.y) : $0 }
+        forwardStack = forwardStack.map { $0.url == from ? Position(url: to, y: $0.y) : $0 }
+        recents.removeAll { $0 == from }
+        addRecent(to)
+        persistTabs()
+        if tab.id == selectedID {
+            refreshFolder()
+            reader.display(tab)
+        }
+        objectWillChange.send()
+    }
+
     func rename(_ tab: DocTab) {
         guard !tab.isUntitled else { return }
-        guard !tab.isDirty || confirmClosing([tab]) else { return }
+        // Unsaved edits go to the file first, so the renamed file has them.
+        guard !tab.isDirty || save(tab) else { return }
         let field = NSTextField(string: tab.fileName)
         field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
         let alert = NSAlert()
@@ -431,11 +459,7 @@ final class AppState: ObservableObject {
         } catch {
             return show(Toast(message: "Couldn't rename: \(error.localizedDescription)"))
         }
-        let (from, to) = (tab.url.path, MarkdownFiles.canonical(target).path)
-        scrollMemory[to] = scrollMemory[from]
-        foldMemory[to] = foldMemory[from]
-        recents.removeAll { $0.path == from }
-        replaceTab(tab, with: target)
+        relocate(tab, to: target)
     }
 
     func duplicate(_ tab: DocTab) {
@@ -474,13 +498,15 @@ final class AppState: ObservableObject {
     private func updateTimeLeft(_ progress: Double) {
         var left: Int?
         if let tab = selected, !tab.showSource, !tab.editing, tab.wordCount > 0, progress > 0.02, progress < 0.99 {
-            left = max(1, Int((Double(tab.wordCount) * (1 - progress) / 230).rounded(.up)))
+            // Rounded like the total, and never more than it.
+            let total = max(1, Int((Double(tab.wordCount) / 230).rounded()))
+            left = min(total, max(1, Int((Double(tab.wordCount) * (1 - progress) / 230).rounded())))
         }
-        if left != minutesLeft { minutesLeft = left }
+        if left != status.minutesLeft { status.minutesLeft = left }
     }
 
     private func setSelectionWords(_ words: Int) {
-        if words != selectionWords { selectionWords = words }
+        if words != status.selectionWords { status.selectionWords = words }
     }
 
     var previewWhileEditing: Bool { UserDefaults.standard.bool(forKey: Prefs.editPreview) }
@@ -606,6 +632,7 @@ final class AppState: ObservableObject {
     @discardableResult
     func stopEditing(_ tab: DocTab) -> Bool {
         guard confirmClosing([tab]) else { return false }
+        status.selectionWords = 0
         let offset = editor.tab === tab ? editor.topOffset : nil
         editor.stopShowing(tab)
         tab.editing = false
@@ -849,11 +876,19 @@ final class AppState: ObservableObject {
 
     /// Lists the Markdown files next to the current document and keeps the list current.
     private func refreshFolder() {
-        guard let folder = selected?.url.deletingLastPathComponent() else {
+        guard let tab = selected else {
             folderFiles = []
+            folderSubfolders = []
             watchedFolder = nil
             folderWatcher = nil
             return
+        }
+        let folder = tab.url.deletingLastPathComponent()
+        // Stay at the same top folder for files in its subfolders (opened from the tree) and for
+        // new documents that aren't saved yet.
+        if let root = watchedFolder {
+            let prefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+            if tab.isUntitled || (tab.url.path.hasPrefix(prefix) && folder != root) { return listFolder() }
         }
         if folder != watchedFolder {
             watchedFolder = folder
@@ -1128,7 +1163,10 @@ final class AppState: ObservableObject {
         guard !restoring else { return }
         rememberScrollPositions()
         UserDefaults.standard.set(
-            ["files": tabs.map(\.url.path), "selected": selected?.url.path ?? ""] as [String: Any],
+            [
+                "files": tabs.filter { !$0.isUntitled }.map(\.url.path),
+                "selected": selected.flatMap { $0.isUntitled ? nil : $0.url.path } ?? "",
+            ] as [String: Any],
             forKey: Prefs.openTabs)
     }
 

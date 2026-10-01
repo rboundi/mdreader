@@ -16,6 +16,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
     var onSelectionWords: ((Int) -> Void)?
     private var scrollWork: DispatchWorkItem?
     private var colorWork: DispatchWorkItem?
+    private var selectionWork: DispatchWorkItem?
     /// Offset to scroll to and focus to take once the editor is in the window.
     private var pendingOffset: Int?
     private var pendingFocus = false
@@ -80,6 +81,7 @@ final class EditorController: NSObject, NSTextViewDelegate {
         textView.textColor = Palette.text
         textView.insertionPointColor = Palette.text
         textView.typingAttributes[.foregroundColor] = Palette.text
+        scheduleColoring()
     }
 
     /// Recolors only when the theme changed (settings change for many other reasons).
@@ -159,16 +161,28 @@ final class EditorController: NSObject, NSTextViewDelegate {
     /// ⌘B / ⌘I: wraps the selection in `marker`, or removes it if it's already there.
     func toggleWrap(_ marker: String) {
         let string = textView.string as NSString
-        let range = textView.selectedRange()
+        var range = textView.selectedRange()
+        // A triple-click selects the line break too; keep it outside the markers.
+        while range.length > 0, let last = UnicodeScalar(string.character(at: NSMaxRange(range) - 1)),
+            CharacterSet.whitespacesAndNewlines.contains(last)
+        {
+            range.length -= 1
+        }
         let m = (marker as NSString).length
         let selected = string.substring(with: range)
-        if selected.hasPrefix(marker), selected.hasSuffix(marker), (selected as NSString).length >= 2 * m {
+        // "*" must not mistake the stars of **bold** for italics.
+        let star = marker == "*"
+        let inner = selected.hasPrefix(marker) && selected.hasSuffix(marker) && (selected as NSString).length >= 2 * m
+            && !(star && selected.hasPrefix("**") && !selected.hasPrefix("***"))
+        let before = range.location >= m ? string.substring(with: NSRange(location: range.location - m, length: m)) : ""
+        let after = NSMaxRange(range) + m <= string.length
+            ? string.substring(with: NSRange(location: NSMaxRange(range), length: m)) : ""
+        let doubled = star && range.location >= 2 && string.substring(with: NSRange(location: range.location - 2, length: 2)) == "**"
+            && !(range.location >= 3 && string.substring(with: NSRange(location: range.location - 3, length: 3)) == "***")
+        if inner {
             replace(range, with: String(selected.dropFirst(marker.count).dropLast(marker.count)))
             textView.setSelectedRange(NSRange(location: range.location, length: range.length - 2 * m))
-        } else if range.location >= m, range.location + range.length + m <= string.length,
-            string.substring(with: NSRange(location: range.location - m, length: m)) == marker,
-            string.substring(with: NSRange(location: range.location + range.length, length: m)) == marker
-        {
+        } else if before == marker, after == marker, !doubled {
             replace(NSRange(location: range.location - m, length: range.length + 2 * m), with: selected)
             textView.setSelectedRange(NSRange(location: range.location - m, length: range.length))
         } else {
@@ -209,10 +223,11 @@ final class EditorController: NSObject, NSTextViewDelegate {
         let string = textView.string as NSString
         let cursor = textView.selectedRange()
         guard cursor.length == 0 else { return false }
-        let line = string.lineRange(for: NSRange(location: cursor.location, length: 0))
-        var lineText = string.substring(with: line)
-        if lineText.hasSuffix("\n") { lineText.removeLast() }
-        if lineText.hasSuffix("\r") { lineText.removeLast() }
+        // The line without its terminator (\n or \r\n).
+        var start = 0, end = 0, contentsEnd = 0
+        string.getLineStart(&start, end: &end, contentsEnd: &contentsEnd, for: NSRange(location: cursor.location, length: 0))
+        let line = NSRange(location: start, length: contentsEnd - start)
+        let lineText = string.substring(with: line)
         let full = NSRange(location: 0, length: (lineText as NSString).length)
         guard let match = Self.listItem.firstMatch(in: lineText, range: full),
             cursor.location >= line.location + match.range.length
@@ -246,13 +261,11 @@ final class EditorController: NSObject, NSTextViewDelegate {
         (try! NSRegularExpression(pattern: #"^[ \t]*(?:[-*+]|\d+[.)])(?=[ \t])|^[ \t]*>+"#, options: .anchorsMatchLines), \.mutedColor),
         (try! NSRegularExpression(pattern: #"\[[^\]\n]*\]\([^)\n]*\)|<https?://[^>\s]+>"#), \.linkColor),
         (try! NSRegularExpression(pattern: #"`[^`\n]+`"#), \.codeColor),
-        (try! NSRegularExpression(pattern: #"(\*\*|__)(?=\S)[^\n]*?\S\1"#), \.strongColor),
     ]
     @objc private var headingColor: NSColor { .controlAccentColor }
     @objc private var mutedColor: NSColor { .secondaryLabelColor }
     @objc private var linkColor: NSColor { .linkColor }
     @objc private var codeColor: NSColor { .systemPink }
-    @objc private var strongColor: NSColor { Palette.text }
 
     private func scheduleColoring() {
         colorWork?.cancel()
@@ -343,16 +356,22 @@ final class EditorController: NSObject, NSTextViewDelegate {
     // MARK: NSTextViewDelegate
 
     func textViewDidChangeSelection(_ notification: Notification) {
-        let range = textView.selectedRange()
         guard tab != nil else { return }
-        var words = 0
-        if range.length > 0 {
-            let selected = (textView.string as NSString).substring(with: range)
-            selected.enumerateSubstrings(in: selected.startIndex..<selected.endIndex, options: .byWords) { _, _, _, _ in
-                words += 1
+        selectionWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.tab != nil else { return }
+            let range = self.textView.selectedRange()
+            var words = 0
+            if range.length > 0 {
+                let selected = (self.textView.string as NSString).substring(with: range)
+                selected.enumerateSubstrings(in: selected.startIndex..<selected.endIndex, options: .byWords) { _, _, _, _ in
+                    words += 1
+                }
             }
+            self.onSelectionWords?(words)
         }
-        onSelectionWords?(words)
+        selectionWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
     func textDidChange(_ notification: Notification) {

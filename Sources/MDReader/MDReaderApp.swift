@@ -110,7 +110,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationWillTerminate(_ notification: Notification) {
-        MainActor.assumeIsolated { AppState.shared.rememberScrollPositions() }
+        MainActor.assumeIsolated {
+            AppState.shared.rememberScrollPositions()
+            AppState.shared.discardUntitled()
+        }
     }
 }
 
@@ -235,7 +238,6 @@ struct AppCommands: Commands {
                 .keyboardShortcut("i")
                 .disabled(state.selected?.editing != true)
             Button("Code") { state.editor.toggleWrap("`") }
-                .keyboardShortcut("`", modifiers: [.command, .shift])
                 .disabled(state.selected?.editing != true)
             Button("Link") { state.editor.insertLink() }
                 .keyboardShortcut("k")
@@ -243,7 +245,7 @@ struct AppCommands: Commands {
         }
 
         CommandGroup(after: .pasteboard) {
-            Button("Copy HTML") { state.copyHTML() }
+            Button("Copy as HTML") { state.copyHTML() }
                 .disabled(state.selected == nil || state.selected?.editing == true)
             Button("Copy as Rich Text") { state.copyRichText() }
                 .keyboardShortcut("c", modifiers: [.command, .option])

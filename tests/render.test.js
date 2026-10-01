@@ -543,3 +543,28 @@ test("a hovered link to another note shows the linked section", async () => {
   assert.match(tip.textContent, /Setup\s+Install it\./);
   assert.doesNotMatch(tip.textContent, /Intro|Later/);
 });
+
+test("find works with smart punctuation; code written as raw HTML keeps its tags", () => {
+  const { window, render } = setup();
+  window.mdr.setOptions({ smart: true });
+  const c = render("I don't \"know\" -- wait...\n\n`foo`'s and \"'nested'\"\n\n<pre><code>plain <b>bold</b>\n</code></pre>");
+  assert.equal(window.mdr.find("don't").total, 1);
+  assert.equal(window.mdr.find('"know" --').total, 1);
+  assert.equal(window.mdr.find("...").total, 1);
+  window.mdr.clearFind();
+  assert.match(c.textContent, /foo’s and “‘nested’”/);
+  assert.equal(c.querySelector("pre b").textContent, "bold");
+});
+
+test("a late preview reply for a link the pointer has left is dropped", async () => {
+  const { window, render, messages } = setup();
+  const c = render("[a](a.md) [b](b.md)");
+  const [a, b] = c.querySelectorAll("a");
+  a.dispatchEvent(new window.MouseEvent("mouseover", { bubbles: true }));
+  await new Promise((r) => setTimeout(r, 600));
+  const first = messages.findLast((m) => m.type === "preview");
+  a.dispatchEvent(new window.MouseEvent("mouseout", { bubbles: true }));
+  b.dispatchEvent(new window.MouseEvent("mouseover", { bubbles: true }));
+  window.mdr.showPreview(first.seq, "# A");
+  assert.equal(window.document.querySelector(".link-preview"), null);
+});

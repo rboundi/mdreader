@@ -472,6 +472,8 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
                 scrollPositions[key] = y.doubleValue
             }
             if let progress = body["progress"] as? NSNumber { onProgress?(progress.doubleValue) }
+        case "rendered":
+            onDisplay?()
         case "selection":
             onSelectionWords?((body["words"] as? NSNumber)?.intValue ?? 0)
         case "copyLink":
@@ -529,8 +531,10 @@ final class ReaderController: NSObject, WKNavigationDelegate, WKScriptMessageHan
         guard let url = parts.url, url.isFileURL else { return }
         Task {
             let text = await Task.detached(priority: .userInitiated) { () -> String? in
-                guard MarkdownFiles.canOpen(url), let data = try? Data(contentsOf: url) else { return nil }
-                return String(decoding: data.prefix(1_000_000), as: UTF8.self)
+                guard MarkdownFiles.canOpen(url), let file = try? FileHandle(forReadingFrom: url) else { return nil }
+                defer { try? file.close() }
+                // The preview shows the start of a note or one section; a megabyte is plenty.
+                return String(decoding: (try? file.read(upToCount: 1_000_000)) ?? Data(), as: UTF8.self)
             }.value
             guard let text else { return }
             webView.callAsyncJavaScript(

@@ -397,7 +397,10 @@
       pre.append(btn);
       if (lang) pre.dataset.lang = lang;
       // One element per line, for optional line numbers.
-      code.innerHTML = splitLines(code.innerHTML).map((line) => `<span class="line">${line}</span>`).join("");
+      // (Not for code written as raw HTML with its own tags inside.)
+      if (!code.querySelector(":not(span)")) {
+        code.innerHTML = splitLines(code.innerHTML).map((line) => `<span class="line">${line}</span>`).join("");
+      }
     });
 
     // Task lists
@@ -879,15 +882,15 @@
 
   // Curly quotes, en and em dashes, and ellipses in text (not code or math).
   function smarten(root) {
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-      acceptNode: (n) => (n.parentElement?.closest(SKIP_SMART) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
-    });
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let before = "";
     let block = null;
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       const here = node.parentElement?.closest(BLOCKS);
       if (here !== block) { before = ""; block = here; }
-      node.nodeValue = smartText(node.nodeValue, before);
+      // Code and web addresses stay as written, but still count as what came before.
+      const skip = node.parentElement?.closest(SKIP_SMART) || /^(https?:\/\/|www\.)\S+$/.test(node.nodeValue.trim());
+      if (!skip) node.nodeValue = smartText(node.nodeValue, before);
       before = node.nodeValue.slice(-1) || before;
     }
   }
@@ -897,7 +900,7 @@
     let out = "";
     for (let i = 0; i < s.length; i++) {
       const c = s[i];
-      const opening = /^$|[\s([{\u2014\u2013-]/.test(i ? s[i - 1] : before);
+      const opening = /^$|[\s([{\u2014\u2013“‘"'-]/.test(i ? out[out.length - 1] : before);
       if (c === '"') out += opening ? "“" : "”";
       else if (c === "'") out += opening ? "‘" : "’";
       else out += c;
@@ -925,6 +928,7 @@
 
   function leaveLink() {
     clearTimeout(previewTimer);
+    previewSeq++;  // a reply still on its way is for a link we've left
     previewLink = null;
     preview?.remove();
     preview = null;
@@ -934,6 +938,7 @@
   function showPreview(seq, md) {
     const a = previewLink;
     if (seq !== previewSeq || !a?.isConnected) return;
+    preview?.remove();
     let fragment = "";
     try { fragment = decodeURIComponent(a.hash.slice(1)); } catch (_) {}
     const tpl = document.createElement("template");
@@ -1025,17 +1030,20 @@
   function find(query, scroll = true, index = 0) {
     clearFind();
     if (!query) return status();
-    const needle = query.toLowerCase();
+    // With smart punctuation on, what's typed ("don't", "--") still finds what's shown (’, –).
+    const fold = (s) => s.toLowerCase().replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
+    const needle = fold(options.smart
+      ? query.replace(/---/g, "—").replace(/--/g, "–").replace(/\.\.\./g, "…") : query);
     const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, {
       acceptNode: (n) =>
-        n.nodeValue.toLowerCase().includes(needle) && !n.parentElement.closest("button, svg, .katex")
+        fold(n.nodeValue).includes(needle) && !n.parentElement.closest("button, svg, .katex")
           ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT,
     });
     const nodes = [];
     while (walker.nextNode()) nodes.push(walker.currentNode);
     for (const node of nodes) {
       const text = node.nodeValue;
-      const lower = text.toLowerCase();
+      const lower = fold(text);
       const frag = document.createDocumentFragment();
       let from = 0, at;
       while ((at = lower.indexOf(needle, from)) !== -1) {
@@ -1414,6 +1422,26 @@
     applyPlace({ index, ratio: offset / Math.max(1, current.md.length) });
   }
 
+  // Keeps the page beside the editor in step with it: the position between two headings in the
+  // Markdown maps to the same fraction of the way between them on the page.
+  function followOffset(offset) {
+    if (current.source) return applyOffset(offset);
+    const offsets = headingOffsets(current.md);
+    const hs = topHeadings();
+    const top = (h) => (h.getClientRects().length ? h.getBoundingClientRect().top + window.scrollY : null);
+    let i = -1;
+    offsets.forEach((o, k) => { if (o <= offset) i = k; });
+    const y0 = i < 0 ? 0 : top(hs[i]);
+    const y1 = i + 1 < hs.length ? top(hs[i + 1]) : document.documentElement.scrollHeight;
+    if (hs.length !== offsets.length || y0 === null || y1 === null) {
+      return window.scrollTo(0, (offset / Math.max(1, current.md.length)) * maxScroll());
+    }
+    const o0 = i < 0 ? 0 : offsets[i];
+    const o1 = i + 1 < offsets.length ? offsets[i + 1] : current.md.length;
+    const t = o1 > o0 ? (offset - o0) / (o1 - o0) : 0;
+    window.scrollTo(0, Math.max(0, y0 + t * (y1 - y0) - 12));
+  }
+
   const maxScroll = () => Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
 
   // Where the reader is: the index of the last heading above the top of the window, and the
@@ -1606,6 +1634,7 @@
       // Draw the current document again with the new punctuation, in place.
       if (lastPayload && !lastPayload.source && !lastPayload.clear) {
         window.mdr.render({ ...lastPayload, scroll: -1, sync: false, anchor: "", offset: -1, follow: false });
+        post({ type: "rendered" });  // so an open find bar searches again
       }
     }
     if (o.followEdits !== undefined) options.followEdits = !!o.followEdits;
@@ -1746,7 +1775,7 @@
       return (lastRender = render(p).catch(() => {}));
     },
     setOptions, find, findStep, clearFind, exportHTML, preparePrint, afterPrint, markBroken, showPreview, tableText,
-    showOffset: (offset) => applyOffset(offset),
+    showOffset: (offset) => followOffset(offset),
     foldAll, diagramSVG, diagramRect, placeOffset, headingOffset,
     scrollToAnchor: (id) => scrollToAnchor(id, true),
     scrollTo: (y) => window.scrollTo(0, y),

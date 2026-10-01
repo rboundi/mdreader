@@ -3,7 +3,7 @@ import Foundation
 /// One open Markdown file.
 final class DocTab: Identifiable {
     let id = UUID()
-    let url: URL
+    private(set) var url: URL
     private(set) var text = ""
     private(set) var error: String?
     var showSource = false
@@ -71,6 +71,16 @@ final class DocTab: Identifiable {
         // The watcher gives up if the file stays missing; pick it up again once it's back.
         if error == nil, watcher?.isWatching != true { startWatching() }
         onChange?()
+    }
+
+    /// Points the tab at the file's new location (after a rename or a first save). The tab keeps
+    /// its identity: scroll position, cursor, undo history and editing state.
+    func move(to newURL: URL) {
+        url = newURL.standardizedFileURL
+        draft = nil
+        load()
+        textChanged = false
+        startWatching()
     }
 
     private func startWatching() {

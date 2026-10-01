@@ -31,7 +31,9 @@
 - Click a table header to sort by that column
 - Right-click a diagram to copy it or save it as PNG or SVG
 - Hover a link to see where it goes; links to other notes show a preview of the linked section
-- Right-click a table to copy it (pastes as cells in Numbers or Excel) or as CSV, a formula to copy its LaTeX, or an image to open it in Preview
+- Right-click a table to copy it for Numbers or Excel, or as CSV
+- Right-click a formula to copy its LaTeX
+- Right-click an image to open it in Preview or show it in Finder
 - Hover a heading and click **#** to copy a link to it
 - Image zoom and a reading progress bar
 - Optional heading numbers (1, 1.1, 1.2) in the document and the outline
@@ -39,7 +41,8 @@
 - Back and Forward after following links, also with a two-finger swipe or the mouse side buttons
 - Jump to Heading (<kbd>⇧</kbd><kbd>⌘</kbd><kbd>J</kbd>)
 - Reopens each file where you left off
-- Word count, time left, tasks done and last modified date in the title bar; the word count of a selection
+- Word count, time left, tasks done and last modified date in the title bar
+- Select text to see how many words it has
 - The front matter `title:` is used as the tab and window title
 - Live reload when the file changes on disk, scrolling to the part that changed
 - Find in page, and search across open tabs or the folder (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>F</kbd>)
@@ -57,7 +60,7 @@
 **Export**
 - PDF (<kbd>⌘</kbd><kbd>E</kbd>), saved to the Desktop by default, with page numbers and clickable links, in A4 or US Letter
 - HTML (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>E</kbd>), a single file with styles and images embedded
-- Copy as Rich Text (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>C</kbd>) for Mail, Notes, Pages or Google Docs, or **Edit → Copy HTML** for the HTML itself
+- Copy as Rich Text (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>C</kbd>) for Mail, Notes, Pages or Google Docs, or **Edit → Copy as HTML** for the HTML itself
 
 **Appearance**
 - Light, Sepia, Dark or System theme; images are dimmed slightly in dark mode
