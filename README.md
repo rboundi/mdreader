@@ -65,13 +65,13 @@
 **Appearance**
 - Light, Sepia, Dark or System theme; images are dimmed slightly in dark mode
 - Sans or serif font, text size, text width and line spacing, justified text, smart quotes and dashes
-- Your own styles in `~/Library/Application Support/MDReader/custom.css` (**Settings → Custom CSS → Edit…**)
+- Your own styles in `~/Library/Application Support/MDReader/custom.css` (**Settings → Appearance → Custom CSS → Edit…**)
 
 **Editing**
 - **Edit** (<kbd>⌥</kbd><kbd>⌘</kbd><kbd>O</kbd>) switches to a text editor with the rendered page beside it; <kbd>⌘</kbd><kbd>S</kbd> saves
 - <kbd>⌘</kbd><kbd>B</kbd>, <kbd>⌘</kbd><kbd>I</kbd> and <kbd>⌘</kbd><kbd>K</kbd> for bold, italic and links; lists continue when you press Return
 - **New Document** (<kbd>⌘</kbd><kbd>N</kbd>)
-- To edit in another app instead, choose it in **Settings → Edit with**. Changes show as soon as you save
+- To edit in another app instead, choose it in **Settings → Editing → Edit with**. Changes show as soon as you save
 
 **Other**
 - Share button for Mail, Messages and AirDrop
