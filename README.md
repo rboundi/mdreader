@@ -170,7 +170,8 @@ Sources/MDReader/
 Resources/
   web/                    Page template, renderer (app.js), styles, vendored libraries
   mdr                     Command line tool
-scripts/                  Icon generator, release script
+  AppIcon.icon            Layered icon (Icon Composer); Assets.car and AppIcon.icns are built from it
+scripts/                  Icon generator (Icon Composer), release script
 tests/                    Renderer tests (Node + jsdom)
 ```
 
