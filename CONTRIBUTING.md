@@ -1,43 +1,40 @@
 # Contributing
 
-MDReader is a reader, not an editor. For larger changes, open an issue first.
+Open an issue before starting a large change.
 
-## Setup
+## Build and test
 
-Requires macOS 13+ and the Xcode Command Line Tools (`xcode-select --install`). The renderer tests need Node.js.
+Needs macOS 13 or later and the Xcode Command Line Tools. The tests need Node.js.
 
 ```bash
-./build.sh                          # builds build/MDReader.app
+./build.sh
 open build/MDReader.app docs/sample.md
-cd tests && npm install && npm test # renderer tests
+cd tests && npm install && npm test
 ```
 
-## Where things live
+## Layout
 
-- **Native app** (`Sources/MDReader/`): SwiftUI and AppKit, with no third-party Swift packages. The app owns one `WKWebView`, shared by all tabs, in `ReaderController.swift`.
-- **Renderer** (`Resources/web/`): `app.js` turns Markdown into HTML with marked, cleans it, and adds the extras (alerts, anchors, math, diagrams, find). `style.css` holds the light, dark and print themes.
-- **Vendored libraries** (`Resources/web/vendor/`): pinned and unmodified. If you update one, update `THIRD_PARTY_NOTICES.md` too.
-- **Icon** (`scripts/make_icon.swift`): the layers are drawn in code and written as an Icon Composer document, `Resources/AppIcon.icon`. Run `./scripts/make_icon.sh` after changing it (needs Xcode 26 or later) and commit the regenerated `Assets.car`, `AppIcon.icns` and `docs/icon-256.png`.
+- `Sources/MDReader/`: the app, in SwiftUI and AppKit
+- `Resources/web/`: the renderer (`app.js`, `style.css`)
+- `Resources/web/vendor/`: bundled libraries, listed in `THIRD_PARTY_NOTICES.md`
+- `Resources/AppIcon.icon`: the icon, written by `scripts/make_icon.sh` (Xcode 26 or later)
+- `tests/render.test.js`: renderer tests
 
-## Guidelines
+## Rules
 
-- Load large dependencies only when needed, as with KaTeX and Mermaid.
-- Add a test in `tests/render.test.js` for renderer changes.
-- `swift build` should have no warnings.
-- Treat document content as untrusted. Keep `sanitize()` strict.
+- No new dependencies without an issue first
+- Load large libraries only when a document needs them
+- Renderer changes come with a test
+- Everything rendered goes through `sanitize()`
 
 ## Releasing
 
-Releases are built and notarized on the maintainer's Mac, so no Apple credentials are stored on GitHub:
-
 ```bash
-scripts/release.sh 1.1.0
+scripts/release.sh 1.2.3
 ```
 
-The script checks that `main` is pushed and CI passed, builds a universal app, signs it with the Developer ID certificate, notarizes and staples the app and the .dmg, tags the commit, publishes the GitHub release and updates the Homebrew cask.
+Needs Xcode, a Developer ID Application certificate, and a notarytool profile named `mdreader-notary`:
 
-It needs, on that Mac:
-- Xcode (for the Intel slice)
-- a **Developer ID Application** certificate in the keychain
-- a notarytool profile named `mdreader-notary`:
-  `xcrun notarytool store-credentials mdreader-notary --key AuthKey_XXXX.p8 --key-id XXXX --issuer <issuer-id>`
+```bash
+xcrun notarytool store-credentials mdreader-notary --key AuthKey_XXXX.p8 --key-id XXXX --issuer <issuer-id>
+```
